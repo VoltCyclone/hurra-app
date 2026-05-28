@@ -656,6 +656,19 @@ int hurra_stream_keyboard(hurra_client_t *c, uint8_t mode, uint8_t period_ms) {
     return send_oneway(c, HURRA_TYPE_STREAM_KB, p, sizeof(p));
 }
 
+int hurra_cb_buttons(hurra_client_t *c, uint8_t enable) {
+    uint8_t p[1] = { enable ? 1 : 0 };
+    return send_oneway(c, HURRA_TYPE_CB_BUTTONS, p, sizeof(p));
+}
+int hurra_cb_axes(hurra_client_t *c, uint8_t enable) {
+    uint8_t p[1] = { enable ? 1 : 0 };
+    return send_oneway(c, HURRA_TYPE_CB_AXES, p, sizeof(p));
+}
+int hurra_cb_keys(hurra_client_t *c, uint8_t enable) {
+    uint8_t p[1] = { enable ? 1 : 0 };
+    return send_oneway(c, HURRA_TYPE_CB_KEYS, p, sizeof(p));
+}
+
 int hurra_on_telemetry(hurra_client_t *c, uint8_t type,
                        hurra_telemetry_cb handler, void *user) {
     if (!c) return -1;

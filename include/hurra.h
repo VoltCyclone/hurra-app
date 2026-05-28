@@ -115,6 +115,16 @@ int hurra_stream_buttons  (hurra_client_t *c, uint8_t mode, uint8_t period_ms);
 int hurra_stream_mouse    (hurra_client_t *c, uint8_t mode, uint8_t period_ms);
 int hurra_stream_keyboard (hurra_client_t *c, uint8_t mode, uint8_t period_ms);
 
+/* ── Change-only callback toggles ────────────────────────────────────────── */
+
+/* Send a single-byte enable payload to CB_BUTTONS / CB_AXES / CB_KEYS. The
+ * firmware emits a TLM_* frame only when the corresponding state changes.
+ * Oneway; returns 0 on success, -1 on serial write error.
+ */
+int hurra_cb_buttons (hurra_client_t *c, uint8_t enable);
+int hurra_cb_axes    (hurra_client_t *c, uint8_t enable);
+int hurra_cb_keys    (hurra_client_t *c, uint8_t enable);
+
 /* Subscribe a callback for a TLM_* type. One callback per type slot.
  * Passing handler=NULL unsubscribes.
  */
