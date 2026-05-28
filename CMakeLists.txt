@@ -42,6 +42,25 @@ if(NOT WIN32)
     target_link_libraries(hurra PUBLIC Threads::Threads)
 endif()
 
+# ── hurra-bridge binary ───────────────────────────────────────────────────
+# Primary product: ferrum-on-PTY <-> hurra-on-serial translation daemon.
+set(BRIDGE_SOURCES
+    src/bridge.c
+    src/ferrum_parser.c
+)
+if(WIN32)
+    list(APPEND BRIDGE_SOURCES src/virtual_port_win32.c)
+else()
+    list(APPEND BRIDGE_SOURCES src/virtual_port_unix.c)
+endif()
+
+add_executable(hurra-bridge ${BRIDGE_SOURCES})
+target_link_libraries(hurra-bridge PRIVATE hurra)
+target_include_directories(hurra-bridge
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 # ── examples ──────────────────────────────────────────────────────────────
 add_executable(hello examples/hello.c)
 target_link_libraries(hello PRIVATE hurra)

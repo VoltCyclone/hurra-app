@@ -8,6 +8,10 @@
  */
 #define _XOPEN_SOURCE 600
 #define _DEFAULT_SOURCE 1
+/* cfmakeraw + posix_openpt: on macOS these live behind _DARWIN_C_SOURCE,
+ * on Linux behind _DEFAULT_SOURCE / _BSD_SOURCE. */
+#define _DARWIN_C_SOURCE 1
+#define _BSD_SOURCE 1
 
 #include "virtual_port.h"
 
