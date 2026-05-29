@@ -43,6 +43,21 @@ static void on_signal(int sig) {
     g_stop = 1;
 }
 
+/* ── Clock ──────────────────────────────────────────────────────────────── */
+
+static uint64_t mono_ms(void) {
+#ifdef _WIN32
+    LARGE_INTEGER f, c;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    return (uint64_t)((c.QuadPart * 1000ULL) / f.QuadPart);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+#endif
+}
+
 /* ── Bridge state ───────────────────────────────────────────────────────── */
 
 typedef struct {
@@ -56,6 +71,19 @@ typedef struct {
     bool cb_keys_enabled;
 
     int  request_timeout_ms;
+
+    /* Diagnostics — bumped at hot-path points, dumped by the 5s heartbeat
+     * and by the __diag__ side-channel. Single-threaded process; no
+     * synchronization needed. uint64_t to handle long-running daemons. */
+    uint64_t hurra_tx_bytes;
+    uint64_t hurra_tx_frames;
+    uint64_t hurra_rx_bytes;
+    uint64_t ferrum_lines_in;       /* lines successfully dispatched from PTY */
+    uint64_t ferrum_moves;          /* km.move() count */
+    uint32_t probe_calls;
+    uint32_t probe_ok;
+    uint32_t probe_fail;
+    uint64_t start_ms;              /* monotonic ms at bridge start */
 } bridge_t;
 
 /* ── PTY write helpers ──────────────────────────────────────────────────── */
@@ -151,21 +179,37 @@ static uint8_t btn_type_for_mask(uint8_t mask) {
 
 static void cb_version(void *user) {
     bridge_t *b = (bridge_t *)user;
-    /* Reply with the literal "kmbox: Ferrum\r\n" — clients sniff this. */
+    /* Ferrum clients expect the canonical "kmbox: Ferrum\r\n" reply — emit it
+     * unconditionally so app compatibility stays intact. Truth about the
+     * firmware link is exposed via the stderr log (and the periodic health
+     * line + __diag__ side-channel below), never via the ferrum surface. */
+    char tmp[64] = {0};
+    int rc = hurra_version(b->hc, tmp, sizeof(tmp), 250);
+    b->probe_calls++;
+    if (rc == 0) {
+        b->probe_ok++;
+        logf("version probe ok: fw=\"%s\"", tmp);
+    } else {
+        b->probe_fail++;
+        logf("version probe FAILED: rc=%d  (firmware not responding on real UART)", rc);
+    }
     ferrum_emit_version_text(writer_for_emit, b);
-    /* Best-effort: also query the firmware so we surface a log if it's
-     * unreachable. Don't block the reply on it. */
-    char tmp[64];
-    (void)hurra_version(b->hc, tmp, sizeof(tmp), 50);
 }
 
 static void cb_move(int32_t x, int32_t y, void *user) {
     bridge_t *b = (bridge_t *)user;
+    b->ferrum_moves++;
+    /* Rate-limited diag log: first 10 moves verbatim, then every 256th. */
+    if (b->ferrum_moves <= 10 || (b->ferrum_moves & 0xFF) == 0) {
+        logf("move(%d, %d)  [seq=%llu]", (int)x, (int)y,
+             (unsigned long long)b->ferrum_moves - 1);
+    }
     if (x > INT16_MAX) x = INT16_MAX;
     if (x < INT16_MIN) x = INT16_MIN;
     if (y > INT16_MAX) y = INT16_MAX;
     if (y < INT16_MIN) y = INT16_MIN;
-    (void)hurra_move(b->hc, (int16_t)x, (int16_t)y);
+    int rc = hurra_move(b->hc, (int16_t)x, (int16_t)y);
+    if (rc != 0) logf("hurra_move rc=%d", rc);
 }
 
 static void cb_button_set(uint8_t mask, uint8_t state, void *user) {
@@ -404,6 +448,14 @@ int main(int argc, char **argv) {
     }
     logf("hurra: opened %s @ %u baud", args.device, (unsigned)args.baud);
 
+    /* TX batching aligned to CH343B FS bulk MPS (64 bytes). Multiple small
+     * Hurra frames in a single PTY read get packed into one USB transfer
+     * instead of one per write() syscall — ~7x throughput for 9-byte moves.
+     * We flush at the end of every main-loop iteration so latency is still
+     * bounded by the loop period (~500us idle, instant on activity). */
+    hurra_set_tx_batch(br.hc, 64);
+    logf("hurra: tx_batch=64 bytes (CH343B MPS); flushed every main-loop tick");
+
     /* Open virtual port. */
 #ifdef _WIN32
     if (!args.virtual_port) {
@@ -481,17 +533,71 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    br.start_ms = mono_ms();
     logf("bridge: running. SIGINT to stop.");
 
     /* Main loop. */
     uint8_t buf[256];
+    /* __diag__ side-channel: accumulate bytes into a small line buffer,
+     * intercept any line that exactly matches "__diag__" (case-sensitive,
+     * before the LF). Real Ferrum apps will never send this. */
+    char     diag_buf[16];
+    uint8_t  diag_pos = 0;
+    uint64_t last_heartbeat_ms = br.start_ms;
+    const uint64_t HEARTBEAT_PERIOD_MS = 5000;
+
     while (!g_stop) {
         int n = vp_read(br.vp, buf, sizeof(buf));
         if (n < 0) {
             logf("vp_read error; exiting");
             break;
         }
-        for (int i = 0; i < n; i++) ferrum_parser_feed_byte(br.parser, buf[i]);
+        for (int i = 0; i < n; i++) {
+            uint8_t c = buf[i];
+            /* Side-channel match runs in parallel with the real parser; we
+             * still feed every byte to ferrum so partial-line state stays
+             * coherent. The match buffer resets on \n. */
+            if (c == '\n') {
+                if (diag_pos == 8 && memcmp(diag_buf, "__diag__", 8) == 0) {
+                    /* Build a one-shot health report. */
+                    uint64_t now = mono_ms();
+                    uint64_t up  = now - br.start_ms;
+                    char out[512];
+                    int w = snprintf(out, sizeof(out),
+                        "bridge_diag {\r\n"
+                        "  uptime_ms=%llu\r\n"
+                        "  probe_calls=%u  probe_ok=%u  probe_fail=%u\r\n"
+                        "  ferrum_lines_in=%llu  ferrum_moves=%llu\r\n"
+                        "  hurra_rx_bytes_total=%llu\r\n"
+                        "  fw_link=%s\r\n"
+                        "}\r\n",
+                        (unsigned long long)up,
+                        (unsigned)br.probe_calls,
+                        (unsigned)br.probe_ok,
+                        (unsigned)br.probe_fail,
+                        (unsigned long long)br.ferrum_lines_in,
+                        (unsigned long long)br.ferrum_moves,
+                        (unsigned long long)br.hurra_rx_bytes,
+                        (br.probe_fail == 0 && br.probe_ok > 0) ? "ok" :
+                        (br.probe_ok == 0 && br.probe_fail > 0) ? "DEAD" :
+                        (br.probe_ok > 0 && br.probe_fail > 0)  ? "flapping" :
+                                                                  "unknown");
+                    if (w > 0) vp_write_all(br.vp, (const uint8_t *)out, (size_t)w);
+                    logf("__diag__ requested; replied %d bytes", w);
+                }
+                diag_pos = 0;
+            } else if (c == '\r') {
+                /* CR before LF is fine; just don't reset, the LF will. */
+            } else if (diag_pos < sizeof(diag_buf)) {
+                diag_buf[diag_pos++] = (char)c;
+            } else {
+                /* Line too long for __diag__ match; remember overflow. */
+                diag_pos = (uint8_t)sizeof(diag_buf);  /* clamp */
+            }
+
+            ferrum_parser_feed_byte(br.parser, c);
+            if (c == '\n') br.ferrum_lines_in++;
+        }
         ferrum_parser_tick(br.parser);
 
         int drained = hurra_poll(br.hc);
@@ -499,6 +605,30 @@ int main(int argc, char **argv) {
             logf("hurra_poll error; exiting");
             break;
         }
+        if (drained > 0) br.hurra_rx_bytes += (uint64_t)drained;
+
+        /* Periodic health heartbeat. */
+        uint64_t now = mono_ms();
+        if (now - last_heartbeat_ms >= HEARTBEAT_PERIOD_MS) {
+            last_heartbeat_ms = now;
+            logf("heartbeat up=%llus  moves=%llu  probes=%u(ok=%u fail=%u)  "
+                 "rx_bytes=%llu  fw=%s",
+                 (unsigned long long)((now - br.start_ms) / 1000),
+                 (unsigned long long)br.ferrum_moves,
+                 (unsigned)br.probe_calls,
+                 (unsigned)br.probe_ok,
+                 (unsigned)br.probe_fail,
+                 (unsigned long long)br.hurra_rx_bytes,
+                 (br.probe_fail == 0 && br.probe_ok > 0) ? "ok" :
+                 (br.probe_ok == 0 && br.probe_fail > 0) ? "DEAD" :
+                 (br.probe_ok > 0 && br.probe_fail > 0)  ? "flapping" :
+                                                           "unknown");
+        }
+
+        /* Drain any batched TX before sleeping so the firmware sees commands
+         * within one loop tick (~500us) even when nothing else triggers a
+         * flush. Cheap: no-op when the buffer is empty or batch is off. */
+        (void)hurra_flush(br.hc);
 
         if (n == 0 && drained == 0) {
             sleep_us(500);
