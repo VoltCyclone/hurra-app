@@ -51,6 +51,30 @@ void            hurra_close(hurra_client_t *c);
  */
 int hurra_poll(hurra_client_t *c);
 
+/* TX batching for USB-UART throughput.
+ *
+ * CH343B (and most full-speed CDC-ACM bridges) ships one USB bulk packet
+ * per write() syscall, with a 1 ms USB frame interval and 64-byte MPS. A
+ * naive "one km.move per write" loop is capped at ~1 kHz no matter the
+ * UART baud rate. Batching multiple TinyFrame frames into a single write()
+ * before flushing fills the 64-byte packet and pushes throughput up by
+ * ~7x for 9-byte move frames.
+ *
+ * batch_bytes = 0  → immediate flush after every TF frame (default; lowest
+ *                    latency, lowest throughput; matches pre-batching v1).
+ * batch_bytes > 0  → accumulate up to N bytes (typically 64), flush when the
+ *                    next frame would overflow N, when hurra_flush() is
+ *                    called, or before any request that waits for a reply.
+ *
+ * Set this before any hot-path sends. Re-setting it mid-stream flushes the
+ * existing buffer.
+ */
+void hurra_set_tx_batch(hurra_client_t *c, size_t batch_bytes);
+
+/* Flush any pending batched TX. Idempotent. Returns 0 on success, -1 on
+ * serial write error. */
+int  hurra_flush(hurra_client_t *c);
+
 /* ── Hot path (oneway). Returns 0 on success, -1 on serial write error. ──── */
 
 int hurra_move        (hurra_client_t *c, int16_t dx, int16_t dy);

@@ -108,6 +108,12 @@ typedef struct {
     void                *user;
 } tlm_slot_t;
 
+/* TX batch buffer capacity. Sized comfortably above CH343B FS bulk MPS (64)
+ * so we can stage a full packet plus a single oversized frame if needed.
+ * TF_SENDBUF_LEN in TinyFrame is 264 bytes, but typical hot-path frames are
+ * 8–12 bytes, so 256 is plenty without wasting memory. */
+#define HURRA_TX_BUF_CAP  256
+
 struct hurra_client {
     serial_port_t   *port;
     TinyFrame        tf;
@@ -116,10 +122,36 @@ struct hurra_client {
     request_slot_t   req[HURRA_REQ_SLOTS];
     tlm_slot_t       tlm[HURRA_TLM_SLOTS];
 
+    /* TX batching state. tx_batch_target == 0 means immediate-flush mode.
+     * tx_buf holds bytes from TF_WriteImpl until target or explicit flush.
+     * Guarded by mu — same lock as every TF_Send/TF_Query path. */
+    size_t           tx_batch_target;
+    size_t           tx_buf_len;
+    uint8_t          tx_buf[HURRA_TX_BUF_CAP];
+
     /* serial_write target for TF_WriteImpl. TinyFrame doesn't pass a
      * user-data pointer through to TF_WriteImpl, so we stash the active
      * client on a thread-local during the send window. */
 };
+
+/* Drain tx_buf to the serial port. Caller must hold c->mu. */
+static int flush_tx_locked(hurra_client_t *c) {
+    if (c->tx_buf_len == 0) return 0;
+    size_t off = 0;
+    while (off < c->tx_buf_len) {
+        int w = serial_write(c->port, c->tx_buf + off, c->tx_buf_len - off);
+        if (w < 0) {
+            fprintf(stderr, "flush_tx: serial_write returned -1\n");
+            fflush(stderr);
+            c->tx_buf_len = 0;
+            return -1;
+        }
+        if (w == 0) { hurra_sleep_us(100); continue; }
+        off += (size_t)w;
+    }
+    c->tx_buf_len = 0;
+    return 0;
+}
 
 /* TinyFrame's TF_WriteImpl is a static function — no userdata pointer is
  * threaded through. We resolve the target client via a thread-local that's
@@ -134,14 +166,95 @@ void TF_WriteImpl(TinyFrame *tf, const uint8_t *buf, uint32_t len) {
     (void)tf;
     hurra_client_t *c = tls_active_client;
     if (!c || !c->port) return;
-    /* Drain in chunks; serial_write may write fewer bytes than requested. */
-    size_t off = 0;
-    while (off < len) {
-        int w = serial_write(c->port, buf + off, len - off);
-        if (w < 0) return;        /* error: caller will see it next poll */
-        if (w == 0) { hurra_sleep_us(100); continue; }
-        off += (size_t)w;
+
+    /* Diag: tally TX bytes + log first few frames so we can see what's
+     * actually going out the real UART. */
+    static uint64_t total_tx = 0;
+    static uint32_t frame_n  = 0;
+    if (frame_n < 5) {
+        char hex[128];
+        size_t hn = (len < 32) ? len : 32;
+        for (size_t i = 0; i < hn; i++) {
+            snprintf(hex + i*3, sizeof(hex) - i*3, "%02x ", buf[i]);
+        }
+        fprintf(stderr, "TX[%u] %u bytes: %s%s\n",
+                (unsigned)frame_n, (unsigned)len, hex,
+                len > 32 ? "..." : "");
+        fflush(stderr);
     }
+    frame_n++;
+    total_tx += len;
+    if ((frame_n & 0x3FF) == 0) {
+        fprintf(stderr, "TX cumulative: frames=%u bytes=%llu\n",
+                (unsigned)frame_n, (unsigned long long)total_tx);
+        fflush(stderr);
+    }
+
+    /* Immediate-flush mode: bypass the buffer entirely. */
+    if (c->tx_batch_target == 0) {
+        size_t off = 0;
+        while (off < len) {
+            int w = serial_write(c->port, buf + off, len - off);
+            if (w < 0) {
+                fprintf(stderr, "TF_WriteImpl: serial_write returned -1\n");
+                fflush(stderr);
+                return;
+            }
+            if (w == 0) { hurra_sleep_us(100); continue; }
+            off += (size_t)w;
+        }
+        return;
+    }
+
+    /* Batched mode. Frames larger than the buffer go direct after flushing
+     * any pending bytes — they wouldn't fit anyway. */
+    if (len > sizeof(c->tx_buf)) {
+        (void)flush_tx_locked(c);
+        size_t off = 0;
+        while (off < len) {
+            int w = serial_write(c->port, buf + off, len - off);
+            if (w < 0) return;
+            if (w == 0) { hurra_sleep_us(100); continue; }
+            off += (size_t)w;
+        }
+        return;
+    }
+
+    /* If this frame would push us past the target, flush what's queued
+     * first so the *next* USB transfer contains this whole frame intact. */
+    if (c->tx_buf_len + len > c->tx_batch_target) {
+        (void)flush_tx_locked(c);
+    }
+    /* Defensive: still catch the (shouldn't-happen) overflow vs buf cap. */
+    if (c->tx_buf_len + len > sizeof(c->tx_buf)) {
+        (void)flush_tx_locked(c);
+    }
+    memcpy(c->tx_buf + c->tx_buf_len, buf, len);
+    c->tx_buf_len += len;
+
+    /* Hitting the target exactly is the ideal stop point — flush now so the
+     * USB stack sees a clean MPS-sized transfer. */
+    if (c->tx_buf_len >= c->tx_batch_target) {
+        (void)flush_tx_locked(c);
+    }
+}
+
+void hurra_set_tx_batch(hurra_client_t *c, size_t batch_bytes) {
+    if (!c) return;
+    hurra_mutex_lock(&c->mu);
+    /* Mode change: drain whatever is queued under the old policy first. */
+    (void)flush_tx_locked(c);
+    if (batch_bytes > sizeof(c->tx_buf)) batch_bytes = sizeof(c->tx_buf);
+    c->tx_batch_target = batch_bytes;
+    hurra_mutex_unlock(&c->mu);
+}
+
+int hurra_flush(hurra_client_t *c) {
+    if (!c) return -1;
+    hurra_mutex_lock(&c->mu);
+    int rc = flush_tx_locked(c);
+    hurra_mutex_unlock(&c->mu);
+    return rc;
 }
 
 /* ── Reply correlation ────────────────────────────────────────────────────── */
@@ -262,6 +375,10 @@ static int send_request(hurra_client_t *c, uint8_t type,
         return -1;
     }
     slot->frame_id = msg.frame_id;
+    /* Request-style sends must flush immediately — we're about to block
+     * waiting for the firmware's reply, and a half-full TX buffer would
+     * silently turn that into a deadlock-until-timeout. */
+    (void)flush_tx_locked(c);
     tls_active_client = NULL;
 
     /* Wait for reply. We don't block on the condvar directly — hurra_poll()
@@ -333,7 +450,14 @@ hurra_client_t *hurra_open(const char *port, uint32_t baud) {
 
 void hurra_close(hurra_client_t *c) {
     if (!c) return;
-    if (c->port) serial_close(c->port);
+    /* Drain any buffered TX before tearing down the serial port so commands
+     * issued just before shutdown still reach the firmware. */
+    if (c->port) {
+        hurra_mutex_lock(&c->mu);
+        (void)flush_tx_locked(c);
+        hurra_mutex_unlock(&c->mu);
+        serial_close(c->port);
+    }
     for (size_t i = 0; i < HURRA_REQ_SLOTS; i++)
         hurra_cond_destroy(&c->req[i].cond);
     hurra_mutex_destroy(&c->mu);
@@ -344,10 +468,25 @@ int hurra_poll(hurra_client_t *c) {
     if (!c) return -1;
     uint8_t buf[512];
     int total = 0;
+    static uint64_t total_rx = 0;
+    static int      saw_any  = 0;
     for (;;) {
         int n = serial_read(c->port, buf, sizeof(buf));
         if (n < 0) return -1;
         if (n == 0) break;
+        /* Diag: print first RX chunk so we know firmware is talking back. */
+        if (!saw_any) {
+            saw_any = 1;
+            char hex[160];
+            size_t hn = ((size_t)n < 48) ? (size_t)n : 48;
+            for (size_t i = 0; i < hn; i++) {
+                snprintf(hex + i*3, sizeof(hex) - i*3, "%02x ", buf[i]);
+            }
+            fprintf(stderr, "RX first chunk: %d bytes: %s%s\n",
+                    n, hex, n > 48 ? "..." : "");
+            fflush(stderr);
+        }
+        total_rx += (uint64_t)n;
         hurra_mutex_lock(&c->mu);
         tls_active_client = c;
         TF_Accept(&c->tf, buf, (uint32_t)n);
