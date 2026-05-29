@@ -110,7 +110,7 @@ static void writer_for_emit(const uint8_t *buf, size_t n, void *user) {
 
 /* ── Logging ────────────────────────────────────────────────────────────── */
 
-static void logf(const char *fmt, ...) {
+static void blog(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
@@ -188,10 +188,10 @@ static void cb_version(void *user) {
     b->probe_calls++;
     if (rc == 0) {
         b->probe_ok++;
-        logf("version probe ok: fw=\"%s\"", tmp);
+        blog("version probe ok: fw=\"%s\"", tmp);
     } else {
         b->probe_fail++;
-        logf("version probe FAILED: rc=%d  (firmware not responding on real UART)", rc);
+        blog("version probe FAILED: rc=%d  (firmware not responding on real UART)", rc);
     }
     ferrum_emit_version_text(writer_for_emit, b);
 }
@@ -201,7 +201,7 @@ static void cb_move(int32_t x, int32_t y, void *user) {
     b->ferrum_moves++;
     /* Rate-limited diag log: first 10 moves verbatim, then every 256th. */
     if (b->ferrum_moves <= 10 || (b->ferrum_moves & 0xFF) == 0) {
-        logf("move(%d, %d)  [seq=%llu]", (int)x, (int)y,
+        blog("move(%d, %d)  [seq=%llu]", (int)x, (int)y,
              (unsigned long long)b->ferrum_moves - 1);
     }
     if (x > INT16_MAX) x = INT16_MAX;
@@ -209,7 +209,7 @@ static void cb_move(int32_t x, int32_t y, void *user) {
     if (y > INT16_MAX) y = INT16_MAX;
     if (y < INT16_MIN) y = INT16_MIN;
     int rc = hurra_move(b->hc, (int16_t)x, (int16_t)y);
-    if (rc != 0) logf("hurra_move rc=%d", rc);
+    if (rc != 0) blog("hurra_move rc=%d", rc);
 }
 
 static void cb_button_set(uint8_t mask, uint8_t state, void *user) {
@@ -235,7 +235,7 @@ static void cb_button_get(uint8_t mask, void *user) {
      * it's discoverable but don't fail. */
     static bool warned = false;
     if (!warned) {
-        logf("warn: km.<button>() get not yet wired through libhurra; "
+        blog("warn: km.<button>() get not yet wired through libhurra; "
              "returning 0. (mask=0x%02x)", (unsigned)mask);
         warned = true;
     }
@@ -443,10 +443,10 @@ int main(int argc, char **argv) {
     /* Open hurra client. */
     br.hc = hurra_open(args.device, args.baud);
     if (!br.hc) {
-        logf("error: hurra_open(%s, %u) failed", args.device, (unsigned)args.baud);
+        blog("error: hurra_open(%s, %u) failed", args.device, (unsigned)args.baud);
         return 1;
     }
-    logf("hurra: opened %s @ %u baud", args.device, (unsigned)args.baud);
+    blog("hurra: opened %s @ %u baud", args.device, (unsigned)args.baud);
 
     /* TX batching aligned to CH343B FS bulk MPS (64 bytes). Multiple small
      * Hurra frames in a single PTY read get packed into one USB transfer
@@ -454,23 +454,23 @@ int main(int argc, char **argv) {
      * We flush at the end of every main-loop iteration so latency is still
      * bounded by the loop period (~500us idle, instant on activity). */
     hurra_set_tx_batch(br.hc, 64);
-    logf("hurra: tx_batch=64 bytes (CH343B MPS); flushed every main-loop tick");
+    blog("hurra: tx_batch=64 bytes (CH343B MPS); flushed every main-loop tick");
 
     /* Open virtual port. */
 #ifdef _WIN32
     if (!args.virtual_port) {
-        logf("error: --virtual-port is required on Windows");
+        blog("error: --virtual-port is required on Windows");
         hurra_close(br.hc);
         return 1;
     }
     br.vp = vp_open(args.virtual_port, NULL);
     if (!br.vp) {
-        logf("error: vp_open(%s) failed (GetLastError=%lu)",
+        blog("error: vp_open(%s) failed (GetLastError=%lu)",
              args.virtual_port, (unsigned long)GetLastError());
         hurra_close(br.hc);
         return 1;
     }
-    logf("vp: opened %s", args.virtual_port);
+    blog("vp: opened %s", args.virtual_port);
 #else
     char *owned_link = NULL;
     const char *link = args.link_path;
@@ -480,7 +480,7 @@ int main(int argc, char **argv) {
     }
     br.vp = vp_open(NULL, link);
     if (!br.vp) {
-        logf("error: vp_open failed");
+        blog("error: vp_open failed");
         free(owned_link);
         hurra_close(br.hc);
         return 1;
@@ -527,14 +527,14 @@ int main(int argc, char **argv) {
 
     br.parser = ferrum_parser_create(&cbs, &br);
     if (!br.parser) {
-        logf("error: ferrum_parser_create failed");
+        blog("error: ferrum_parser_create failed");
         vp_close(br.vp);
         hurra_close(br.hc);
         return 1;
     }
 
     br.start_ms = mono_ms();
-    logf("bridge: running. SIGINT to stop.");
+    blog("bridge: running. SIGINT to stop.");
 
     /* Main loop. */
     uint8_t buf[256];
@@ -549,7 +549,7 @@ int main(int argc, char **argv) {
     while (!g_stop) {
         int n = vp_read(br.vp, buf, sizeof(buf));
         if (n < 0) {
-            logf("vp_read error; exiting");
+            blog("vp_read error; exiting");
             break;
         }
         for (int i = 0; i < n; i++) {
@@ -583,7 +583,7 @@ int main(int argc, char **argv) {
                         (br.probe_ok > 0 && br.probe_fail > 0)  ? "flapping" :
                                                                   "unknown");
                     if (w > 0) vp_write_all(br.vp, (const uint8_t *)out, (size_t)w);
-                    logf("__diag__ requested; replied %d bytes", w);
+                    blog("__diag__ requested; replied %d bytes", w);
                 }
                 diag_pos = 0;
             } else if (c == '\r') {
@@ -602,7 +602,7 @@ int main(int argc, char **argv) {
 
         int drained = hurra_poll(br.hc);
         if (drained < 0) {
-            logf("hurra_poll error; exiting");
+            blog("hurra_poll error; exiting");
             break;
         }
         if (drained > 0) br.hurra_rx_bytes += (uint64_t)drained;
@@ -611,7 +611,7 @@ int main(int argc, char **argv) {
         uint64_t now = mono_ms();
         if (now - last_heartbeat_ms >= HEARTBEAT_PERIOD_MS) {
             last_heartbeat_ms = now;
-            logf("heartbeat up=%llus  moves=%llu  probes=%u(ok=%u fail=%u)  "
+            blog("heartbeat up=%llus  moves=%llu  probes=%u(ok=%u fail=%u)  "
                  "rx_bytes=%llu  fw=%s",
                  (unsigned long long)((now - br.start_ms) / 1000),
                  (unsigned long long)br.ferrum_moves,
@@ -635,7 +635,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    logf("bridge: stopping.");
+    blog("bridge: stopping.");
     ferrum_parser_destroy(br.parser);
     vp_close(br.vp);
     hurra_close(br.hc);
