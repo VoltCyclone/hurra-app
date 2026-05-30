@@ -71,8 +71,7 @@ serial_port_t *serial_open(const char *path, uint32_t baud) {
         return NULL;
     }
 
-    /* Non-blocking reads: all timeouts to zero except the MaxBetween value
-     * which signals "return immediately with whatever is available." */
+    /* ReadIntervalTimeout=MAXDWORD → return immediately with whatever is available. */
     COMMTIMEOUTS to;
     memset(&to, 0, sizeof(to));
     to.ReadIntervalTimeout         = MAXDWORD;

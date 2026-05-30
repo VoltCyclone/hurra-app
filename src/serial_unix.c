@@ -42,7 +42,6 @@ struct serial_port {
 };
 
 #if defined(__linux__)
-/* Linux path: skip termios entirely and configure via termios2/ioctl. */
 static int configure_linux(int fd, uint32_t baud) {
     struct termios2 t2;
     memset(&t2, 0, sizeof(t2));
@@ -68,7 +67,6 @@ static int configure_linux(int fd, uint32_t baud) {
     return 0;
 }
 #else
-/* macOS path: standard tcsetattr + IOSSIOSPEED for arbitrary baud. */
 static int configure_termios(int fd, uint32_t baud) {
     struct termios tio;
     if (tcgetattr(fd, &tio) < 0) return -1;
@@ -77,8 +75,7 @@ static int configure_termios(int fd, uint32_t baud) {
     tio.c_cflag &= ~(PARENB | CSTOPB | CRTSCTS);
     tio.c_cc[VMIN]  = 0;
     tio.c_cc[VTIME] = 0;
-    /* Set a standard placeholder baud first so tcsetattr() is happy. The
-     * IOSSIOSPEED ioctl below replaces it with the real value. */
+    /* B9600 placeholder; IOSSIOSPEED below sets the real rate. */
     cfsetispeed(&tio, B9600);
     cfsetospeed(&tio, B9600);
     if (tcsetattr(fd, TCSANOW, &tio) < 0) return -1;
@@ -134,7 +131,7 @@ int serial_write(serial_port_t *s, const uint8_t *buf, size_t n) {
         ssize_t w = write(s->fd, buf + off, n - off);
         if (w < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                /* Kernel buffer full; brief retry via the caller's poll loop. */
+                /* Kernel buffer full; caller will retry. */
                 return (int)off;
             }
             if (errno == EINTR) continue;

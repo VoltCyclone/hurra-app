@@ -168,10 +168,8 @@ static int btn_index_for_mask(uint8_t mask) {
 
 static void cb_version(void *user) {
     bridge_t *b = (bridge_t *)user;
-    /* Ferrum clients expect the canonical "kmbox: Ferrum\r\n" reply — emit it
-     * unconditionally so app compatibility stays intact. Truth about the
-     * firmware link is exposed via the stderr log (and the periodic health
-     * line + __diag__ side-channel below), never via the ferrum surface. */
+    /* Always emit the canonical "kmbox: Ferrum\r\n" reply for compatibility.
+     * Firmware link health is visible via stderr log and __diag__ side-channel. */
     char tmp[64] = {0};
     int rc = hurra_version(b->hc, tmp, sizeof(tmp), 250);
     b->probe_calls++;
@@ -188,7 +186,7 @@ static void cb_version(void *user) {
 static void cb_move(int32_t x, int32_t y, void *user) {
     bridge_t *b = (bridge_t *)user;
     b->ferrum_moves++;
-    /* Rate-limited diag log: first 10 moves verbatim, then every 256th. */
+    /* Rate-limited log: first 10 moves, then every 256th. */
     if (b->ferrum_moves <= 10 || (b->ferrum_moves & 0xFF) == 0) {
         blog("move(%d, %d)  [seq=%llu]", (int)x, (int)y,
              (unsigned long long)b->ferrum_moves - 1);
@@ -298,12 +296,11 @@ static void cb_init(void *user) {
 
 static void cb_baud(uint32_t baud, void *user) {
     bridge_t *b = (bridge_t *)user;
-    /* v1 limitation: tell the firmware to switch baud, but keep our serial
-     * link at the current rate. Documented in README. */
+    /* Tells firmware to switch baud; bridge serial link stays at current rate. */
     (void)hurra_set_baud(b->hc, baud, b->request_timeout_ms);
 }
 
-/* CB toggles. Track local enable state and propagate to the firmware. */
+/* CB toggles: track local enable state and propagate to firmware. */
 static void cb_cb_buttons_set(uint8_t enable, void *user) {
     bridge_t *b = (bridge_t *)user;
     b->cb_buttons_enabled = enable != 0;
@@ -378,7 +375,7 @@ static int parse_args(int argc, char **argv, args_t *out) {
     return 0;
 }
 
-/* Build a default Unix symlink path: $HOME/.hurra-bridge.tty. */
+/* Default Unix symlink path: $HOME/.hurra-bridge.tty. */
 static char *default_link_path(void) {
     const char *home = getenv(HOME_ENV);
     if (!home || !*home) return NULL;
@@ -415,7 +412,6 @@ int main(int argc, char **argv) {
     memset(&br, 0, sizeof(br));
     br.request_timeout_ms = args.timeout_ms;
 
-    /* Open hurra client. */
     br.hc = hurra_open(args.device, args.baud);
     if (!br.hc) {
         blog("error: hurra_open(%s, %u) failed", args.device, (unsigned)args.baud);
@@ -423,15 +419,11 @@ int main(int argc, char **argv) {
     }
     blog("hurra: opened %s @ %u baud", args.device, (unsigned)args.baud);
 
-    /* TX batching aligned to CH343B FS bulk MPS (64 bytes). Multiple small
-     * Hurra frames in a single PTY read get packed into one USB transfer
-     * instead of one per write() syscall — ~7x throughput for 9-byte moves.
-     * We flush at the end of every main-loop iteration so latency is still
-     * bounded by the loop period (~500us idle, instant on activity). */
+    /* Pack multiple small frames into one 64-byte USB transfer (CH343B MPS).
+     * Flushed at the end of every loop tick for bounded latency. */
     hurra_set_tx_batch(br.hc, 64);
     blog("hurra: tx_batch=64 bytes (CH343B MPS); flushed every main-loop tick");
 
-    /* Open virtual port. */
 #ifdef _WIN32
     if (!args.virtual_port) {
         blog("error: --virtual-port is required on Windows");
@@ -467,12 +459,10 @@ int main(int argc, char **argv) {
     free(owned_link);
 #endif
 
-    /* Subscribe telemetry handlers. */
     (void)hurra_on_telemetry(br.hc, HURRA_TYPE_TLM_BUTTONS, on_tlm_buttons, &br);
     (void)hurra_on_telemetry(br.hc, HURRA_TYPE_TLM_AXIS,    on_tlm_axis,    &br);
     (void)hurra_on_telemetry(br.hc, HURRA_TYPE_TLM_KB,      on_tlm_kb,      &br);
 
-    /* Build the ferrum callback table. */
     ferrum_callbacks_t cbs;
     memset(&cbs, 0, sizeof(cbs));
     cbs.on_version        = cb_version;
@@ -511,11 +501,9 @@ int main(int argc, char **argv) {
     br.start_ms = mono_ms();
     blog("bridge: running. SIGINT to stop.");
 
-    /* Main loop. */
     uint8_t buf[256];
-    /* __diag__ side-channel: accumulate bytes into a small line buffer,
-     * intercept any line that exactly matches "__diag__" (case-sensitive,
-     * before the LF). Real Ferrum apps will never send this. */
+    /* __diag__ side-channel: intercept lines that exactly match "__diag__"
+     * and reply with a health report. Real Ferrum apps will never send this. */
     char     diag_buf[16];
     uint8_t  diag_pos = 0;
     uint64_t last_heartbeat_ms = br.start_ms;
@@ -529,12 +517,8 @@ int main(int argc, char **argv) {
         }
         for (int i = 0; i < n; i++) {
             uint8_t c = buf[i];
-            /* Side-channel match runs in parallel with the real parser; we
-             * still feed every byte to ferrum so partial-line state stays
-             * coherent. The match buffer resets on \n. */
             if (c == '\n') {
                 if (diag_pos == 8 && memcmp(diag_buf, "__diag__", 8) == 0) {
-                    /* Build a one-shot health report. */
                     uint64_t now = mono_ms();
                     uint64_t up  = now - br.start_ms;
                     char out[512];
@@ -566,8 +550,7 @@ int main(int argc, char **argv) {
             } else if (diag_pos < sizeof(diag_buf)) {
                 diag_buf[diag_pos++] = (char)c;
             } else {
-                /* Line too long for __diag__ match; remember overflow. */
-                diag_pos = (uint8_t)sizeof(diag_buf);  /* clamp */
+                diag_pos = (uint8_t)sizeof(diag_buf);  /* line too long; clamp */
             }
 
             ferrum_parser_feed_byte(br.parser, c);
@@ -582,7 +565,6 @@ int main(int argc, char **argv) {
         }
         if (drained > 0) br.hurra_rx_bytes += (uint64_t)drained;
 
-        /* Periodic health heartbeat. */
         uint64_t now = mono_ms();
         if (now - last_heartbeat_ms >= HEARTBEAT_PERIOD_MS) {
             last_heartbeat_ms = now;
@@ -600,9 +582,7 @@ int main(int argc, char **argv) {
                                                            "unknown");
         }
 
-        /* Drain any batched TX before sleeping so the firmware sees commands
-         * within one loop tick (~500us) even when nothing else triggers a
-         * flush. Cheap: no-op when the buffer is empty or batch is off. */
+        /* Flush batched TX each tick so the firmware sees commands within ~500us. */
         (void)hurra_flush(br.hc);
 
         if (n == 0 && drained == 0) {
