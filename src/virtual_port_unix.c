@@ -46,16 +46,14 @@ vp_port_t *vp_open(const char *arg, const char *link_path) {
     if (grantpt(mfd) < 0) { int e = errno; close(mfd); errno = e; return NULL; }
     if (unlockpt(mfd) < 0) { int e = errno; close(mfd); errno = e; return NULL; }
 
-    /* Resolve the slave path. ptsname() returns a pointer to static storage
-     * on some platforms; copy it. */
+    /* ptsname() returns static storage on some platforms; copy it. */
     const char *sp = ptsname(mfd);
     if (!sp) { int e = errno; close(mfd); errno = e; return NULL; }
 
     char *slave_copy = strdup(sp);
     if (!slave_copy) { close(mfd); errno = ENOMEM; return NULL; }
 
-    /* Put the master in raw + non-blocking mode. Without raw mode the kernel
-     * line discipline would echo/translate bytes between the two ends. */
+    /* Raw mode: prevents line discipline echo/translation between the two ends. */
     struct termios tio;
     if (tcgetattr(mfd, &tio) == 0) {
         cfmakeraw(&tio);
@@ -65,28 +63,23 @@ vp_port_t *vp_open(const char *arg, const char *link_path) {
     }
     set_nonblock(mfd);
 
-    /* Open the slave side once so the PTY stays "connected" even if no
-     * client is attached yet — otherwise reads return EIO on macOS when the
-     * slave isn't open. We then close it; clients re-open the path. */
+    /* Open the slave once so the PTY stays connected before any client attaches;
+     * on macOS reads return EIO if no one has the slave open. */
     int sfd = open(slave_copy, O_RDWR | O_NOCTTY);
     if (sfd >= 0) {
-        /* Apply raw mode to the slave too so client tools see byte-exact IO. */
+        /* Apply raw mode to the slave so clients see byte-exact IO. */
         struct termios sti;
         if (tcgetattr(sfd, &sti) == 0) {
             cfmakeraw(&sti);
             tcsetattr(sfd, TCSANOW, &sti);
         }
-        /* Keep the slave open in the background by leaking the fd; this keeps
-         * the PTY connection alive across client open/close cycles. Bridges
-         * are long-lived, so the fd lasts the process lifetime. */
-        /* Intentionally not closing sfd. */
+        /* Intentionally leak sfd: keeps PTY alive across client open/close cycles. */
         (void)sfd;
     }
 
     char *link_copy = NULL;
     if (link_path && link_path[0]) {
-        /* Best-effort: remove a stale symlink, create the new one. Failures
-         * are non-fatal — print to stderr and continue. */
+        /* Best-effort: remove stale symlink, create new one. Non-fatal on failure. */
         (void)unlink(link_path);
         if (symlink(slave_copy, link_path) == 0) {
             link_copy = strdup(link_path);
@@ -130,9 +123,7 @@ int vp_read(vp_port_t *vp, uint8_t *buf, size_t n) {
     ssize_t r = read(vp->master_fd, buf, n);
     if (r < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
-        /* On macOS, a slave that's open with no data returns 0; a slave that
-         * has closed returns -1/EIO. Treat EIO as "no data" so the bridge
-         * doesn't die when a client disconnects momentarily. */
+        /* macOS: EIO means slave closed; treat as no data so bridge stays alive. */
         if (errno == EIO) return 0;
         return -1;
     }

@@ -1,6 +1,6 @@
 # hurra-app
 
-Host-side adapter for the [Hurra binary protocol](https://github.com/ramseymcgrath/imxrtnsy).
+Host-side adapter for the [Hurra binary protocol](https://github.com/VoltCyclone/Hurra-v2).
 
 The primary product is `hurra-bridge` — a small daemon that exposes a
 **Ferrum-compatible virtual COM port** while talking to the firmware over
@@ -11,7 +11,8 @@ The underlying `libhurra` library (used internally by the bridge) is also
 available for C/C++ projects that want to drive the Hurra protocol directly.
 
 * **Targets**: macOS, Linux, Windows (build matrix in CI).
-* **Real-link baud**: 4 Mbps default; arbitrary rates supported via
+* **Real-link baud**: 4 Mbps default, matching the firmware's Hurra-build
+  default — so `--baud` is usually unnecessary. Arbitrary rates use
   platform-specific custom-baud APIs (IOSSIOSPEED on macOS, `termios2`/BOTHER
   on Linux, `DCB.BaudRate` on Windows).
 
@@ -39,15 +40,15 @@ points at whatever PTY slave the kernel allocated, so clients can hardcode
 a stable path.
 
 ```bash
-# Terminal 1 — bridge
-./build/hurra-bridge --device /dev/cu.usbmodem01 --baud 4000000
+# Terminal 1 — bridge (4 Mbaud default; add --baud N only to override)
+./build/hurra-bridge --device /dev/cu.usbmodem01
 # PTY: /dev/ttys004
 # Symlink: /Users/you/.hurra-bridge.tty
 # hurra: opened /dev/cu.usbmodem01 @ 4000000 baud
 # bridge: running. SIGINT to stop.
 
 # Terminal 2 — point any ferrum-speaking tool at the symlink
-~/code/imxrtnsy/tools/ferrum_aim_test.py --port ~/.hurra-bridge.tty
+~/code/Hurra-v2/tools/ferrum_aim_test.py --port ~/.hurra-bridge.tty
 ```
 
 Flags:
@@ -80,7 +81,7 @@ numeric suffix ≥10 or a non-`COMx` form like `CNCA0`).
 ## Ferrum surface (handled by the bridge)
 
 The bridge implements every command in the firmware's Ferrum parser
-(`imxrtnsy/src/ferrum.c`):
+(`Hurra-v2/src/ferrum.c`):
 
 * Mouse: `km.move`, `m(x,y)`, `km.left/right/middle/side1/side2` (get + set),
   `km.click`, `km.wheel`, `km.catch_xy`.
@@ -95,14 +96,12 @@ Reply formats match `ferrum.c` byte-for-byte (`0\r\n`, `1\r\n`,
 `(x, y)\r\n`, `km.<bitmap_byte>\r\n`, `Axes(dx, dy, scroll)\r\n`,
 `Keys(k1, k2, ...)\r\n`, `kmbox: Ferrum\r\n`).
 
-### v1 limitations
+### Limitations
 
-* `km.<button>()` (button-state read) currently returns `0` — the firmware
-  side supports it but `libhurra` does not yet expose `hurra_button_get`.
-  Calls to `km.<button>(0)` / `km.<button>(1)` (set) work fine.
 * `km.baud(n)` instructs the firmware to switch baud but does **not** change
-  the bridge's host-side serial link. After issuing it you must restart the
-  bridge with `--baud N`.
+  the bridge's host-side serial link, so the two desync until you restart the
+  bridge at the new rate. (The firmware auto-resets to its boot-default baud
+  after extended RX idle, so a stale bump self-heals on reconnect.)
 
 ## Library (advanced)
 

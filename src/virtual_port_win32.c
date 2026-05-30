@@ -50,9 +50,7 @@ vp_port_t *vp_open(const char *arg, const char *link_path) {
     free(path);
     if (h == INVALID_HANDLE_VALUE) return NULL;
 
-    /* Configure as a raw 8N1 link. com0com doesn't really need this since
-     * both ends are kernel-virtual, but it can't hurt and matches what most
-     * Ferrum-speaking clients would expect. */
+    /* Configure raw 8N1; com0com is kernel-virtual but clients may expect it. */
     DCB dcb;
     memset(&dcb, 0, sizeof(dcb));
     dcb.DCBlength = sizeof(dcb);
@@ -72,8 +70,7 @@ vp_port_t *vp_open(const char *arg, const char *link_path) {
         SetCommState(h, &dcb);
     }
 
-    /* Non-blocking-ish timeouts: ReadFile returns immediately when no data
-     * is queued. */
+    /* ReadIntervalTimeout=MAXDWORD → ReadFile returns immediately if no data. */
     COMMTIMEOUTS to;
     memset(&to, 0, sizeof(to));
     to.ReadIntervalTimeout         = MAXDWORD;

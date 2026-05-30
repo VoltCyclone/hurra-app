@@ -23,8 +23,6 @@
 #define FERRUM_MAX_ARGS    8
 #define FERRUM_IDLE_GAP_MS 25u
 
-/* ── Monotonic ms ───────────────────────────────────────────────────────── */
-
 static uint32_t now_ms(void) {
 #ifdef _WIN32
     return (uint32_t)GetTickCount64();
@@ -35,8 +33,6 @@ static uint32_t now_ms(void) {
                       (uint64_t)ts.tv_nsec / 1000000ULL);
 #endif
 }
-
-/* ── Helpers ────────────────────────────────────────────────────────────── */
 
 static bool parse_int(const char *s, uint8_t len, int32_t *out) {
     if (len == 0) return false;
@@ -89,8 +85,6 @@ size_t ferrum_format_int(int32_t v, char *buf) {
     return out;
 }
 
-/* ── Text emitters ──────────────────────────────────────────────────────── */
-
 void ferrum_emit_version_text(ferrum_write_fn w, void *u) {
     static const uint8_t s[] = "kmbox: Ferrum\r\n";
     if (w) w(s, sizeof(s) - 1, u);
@@ -133,7 +127,6 @@ void ferrum_emit_axes_cb(ferrum_write_fn w, void *u,
 }
 
 void ferrum_emit_keys_cb(ferrum_write_fn w, void *u, const uint8_t keys[6]) {
-    /* Sort ascending. */
     uint8_t sorted[6];
     memcpy(sorted, keys, 6);
     for (uint8_t i = 1; i < 6; i++) {
@@ -160,8 +153,6 @@ void ferrum_emit_keys_cb(ferrum_write_fn w, void *u, const uint8_t keys[6]) {
     buf[n++] = ')'; buf[n++] = '\r'; buf[n++] = '\n';
     if (w) w((const uint8_t *)buf, n, u);
 }
-
-/* ── Argument tokenizer ─────────────────────────────────────────────────── */
 
 typedef struct {
     const char *p;
@@ -195,8 +186,6 @@ static uint8_t split_args(const char *s, uint8_t len, arg_t *args) {
     return n;
 }
 
-/* ── Parser state ───────────────────────────────────────────────────────── */
-
 struct ferrum_parser {
     ferrum_callbacks_t cbs;
     void              *user;
@@ -218,8 +207,6 @@ ferrum_parser_t *ferrum_parser_create(const ferrum_callbacks_t *cbs, void *user)
 void ferrum_parser_destroy(ferrum_parser_t *p) {
     free(p);
 }
-
-/* ── Dispatch ───────────────────────────────────────────────────────────── */
 
 static inline bool name_is(const char *s, uint8_t len, const char *kw) {
     uint8_t kl = (uint8_t)strlen(kw);
