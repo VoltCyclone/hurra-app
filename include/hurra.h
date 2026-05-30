@@ -90,6 +90,10 @@ int hurra_button      (hurra_client_t *c, uint8_t mask, uint8_t state);
 
 /* ── Request/reply ───────────────────────────────────────────────────────── */
 
+/* Read a button's current (injected) state. `button` is 0=L,1=R,2=M,3=S1,4=S2.
+ * On success writes *out and returns 0; returns -1 on bad arg or timeout. */
+int hurra_button_get  (hurra_client_t *c, uint8_t button, bool *out, int timeout_ms);
+
 int hurra_version (hurra_client_t *c, char *out, size_t outsz, int timeout_ms);
 int hurra_ping    (hurra_client_t *c, uint64_t *rtt_us, int timeout_ms);
 int hurra_stats   (hurra_client_t *c, hurra_stats_t *out, int timeout_ms);

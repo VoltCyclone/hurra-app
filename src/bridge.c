@@ -166,17 +166,6 @@ static int btn_index_for_mask(uint8_t mask) {
     }
 }
 
-static uint8_t btn_type_for_mask(uint8_t mask) {
-    switch (mask) {
-        case 0x01: return HURRA_TYPE_BTN_LEFT;
-        case 0x02: return HURRA_TYPE_BTN_RIGHT;
-        case 0x04: return HURRA_TYPE_BTN_MIDDLE;
-        case 0x08: return HURRA_TYPE_BTN_SIDE1;
-        case 0x10: return HURRA_TYPE_BTN_SIDE2;
-        default:   return 0;
-    }
-}
-
 static void cb_version(void *user) {
     bridge_t *b = (bridge_t *)user;
     /* Ferrum clients expect the canonical "kmbox: Ferrum\r\n" reply — emit it
@@ -221,25 +210,11 @@ static void cb_button_set(uint8_t mask, uint8_t state, void *user) {
 
 static void cb_button_get(uint8_t mask, void *user) {
     bridge_t *b = (bridge_t *)user;
-    uint8_t type = btn_type_for_mask(mask);
-    if (!type) { ferrum_emit_bool(writer_for_emit, b, 0); return; }
-
-    /* No hurra_button_get helper exists; the firmware spec uses an empty
-     * payload to a BTN_* TYPE as a get and replies with a single byte.
-     * We approximate by hand-rolling a request: pack a zero-length payload,
-     * use the public hurra_lock-style pattern via... hurra doesn't expose
-     * a low-level "send empty request and wait" helper either.
-     *
-     * For v1 we fall back to reporting 0; a fix-up commit can add a
-     * hurra_button_get(c, mask, &state, timeout) helper. Log a warning so
-     * it's discoverable but don't fail. */
-    static bool warned = false;
-    if (!warned) {
-        blog("warn: km.<button>() get not yet wired through libhurra; "
-             "returning 0. (mask=0x%02x)", (unsigned)mask);
-        warned = true;
-    }
-    ferrum_emit_bool(writer_for_emit, b, 0);
+    int idx = btn_index_for_mask(mask);
+    if (idx < 0) { ferrum_emit_bool(writer_for_emit, b, 0); return; }
+    bool down = false;
+    int rc = hurra_button_get(b->hc, (uint8_t)idx, &down, b->request_timeout_ms);
+    ferrum_emit_bool(writer_for_emit, b, (rc == 0 && down) ? 1 : 0);
 }
 
 static void cb_click(uint8_t button_0based, void *user) {

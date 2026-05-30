@@ -580,6 +580,26 @@ int hurra_button(hurra_client_t *c, uint8_t mask, uint8_t state) {
     return send_oneway(c, type, p, sizeof(p));
 }
 
+int hurra_button_get(hurra_client_t *c, uint8_t button, bool *out, int timeout_ms) {
+    /* `button`: 0=L,1=R,2=M,3=S1,4=S2 → BTN_* TYPE. The firmware treats an
+     * empty-payload BTN_* request as a get and replies with one state byte. */
+    if (!out) return -1;
+    uint8_t type;
+    switch (button) {
+        case 0: type = HURRA_TYPE_BTN_LEFT;   break;
+        case 1: type = HURRA_TYPE_BTN_RIGHT;  break;
+        case 2: type = HURRA_TYPE_BTN_MIDDLE; break;
+        case 3: type = HURRA_TYPE_BTN_SIDE1;  break;
+        case 4: type = HURRA_TYPE_BTN_SIDE2;  break;
+        default: return -1;
+    }
+    uint8_t buf[2];
+    int n = send_request(c, type, NULL, 0, buf, sizeof(buf), timeout_ms);
+    if (n < 1) return -1;
+    *out = buf[0] != 0;
+    return 0;
+}
+
 /* ── Request/reply ───────────────────────────────────────────────────────── */
 
 int hurra_version(hurra_client_t *c, char *out, size_t outsz, int timeout_ms) {
