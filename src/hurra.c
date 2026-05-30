@@ -56,7 +56,20 @@
 #  include <errno.h>
    typedef pthread_mutex_t hurra_mutex_t;
    typedef pthread_cond_t  hurra_cond_t;
-#  define hurra_mutex_init(m)    pthread_mutex_init((m), NULL)
+   /* RECURSIVE so the same thread can re-lock. hurra_poll() holds the mutex
+    * across TF_Accept(), which synchronously dispatches into reply_listener /
+    * generic_listener — both of which re-lock the mutex. A non-recursive mutex
+    * deadlocks there the instant the firmware sends a frame. (Windows
+    * CRITICAL_SECTION is already recursive, so this matches that behavior.) */
+   static inline int hurra_mutex_init_recursive(pthread_mutex_t *m) {
+       pthread_mutexattr_t attr;
+       pthread_mutexattr_init(&attr);
+       pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+       int rc = pthread_mutex_init(m, &attr);
+       pthread_mutexattr_destroy(&attr);
+       return rc;
+   }
+#  define hurra_mutex_init(m)    hurra_mutex_init_recursive(m)
 #  define hurra_mutex_destroy(m) pthread_mutex_destroy(m)
 #  define hurra_mutex_lock(m)    pthread_mutex_lock(m)
 #  define hurra_mutex_unlock(m)  pthread_mutex_unlock(m)
