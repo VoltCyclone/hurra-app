@@ -5,16 +5,18 @@
  * prints the firmware version + a ping RTT, then nudges the mouse 50 px
  * right and closes.
  *
- * Usage: hello [/dev/cu.usbmodem01]
+ * Usage: hello [/dev/cu.usbmodem01] [baud]
  */
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "hurra.h"
 
 int main(int argc, char **argv) {
     const char *port = argc > 1 ? argv[1] : "/dev/cu.usbmodem01";
+    uint32_t baud = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 10) : 4000000;
 
-    hurra_client_t *c = hurra_open(port, 4000000);
+    hurra_client_t *c = hurra_open(port, baud);
     if (!c) {
         fprintf(stderr, "open failed: %s\n", port);
         return 1;
