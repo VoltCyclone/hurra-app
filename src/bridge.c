@@ -277,11 +277,6 @@ static void cb_version(void *user) {
 static void cb_move(int32_t x, int32_t y, void *user) {
     bridge_t *b = (bridge_t *)user;
     b->ferrum_moves++;
-    /* Rate-limited log: first 10 moves, then every 256th. */
-    if (b->ferrum_moves <= 10 || (b->ferrum_moves & 0xFF) == 0) {
-        blog("move(%d, %d)  [seq=%llu]", (int)x, (int)y,
-             (unsigned long long)b->ferrum_moves - 1);
-    }
     if (x > INT16_MAX) x = INT16_MAX;
     if (x < INT16_MIN) x = INT16_MIN;
     if (y > INT16_MAX) y = INT16_MAX;
@@ -563,6 +558,37 @@ static void sleep_us(unsigned us) {
 #endif
 }
 
+/* ── Live status line ───────────────────────────────────────────────────── */
+
+/* Clear the current status line (TTY only) so an event/log line can be printed
+ * cleanly above it. */
+static void status_clear(void) {
+    if (g_ui.status_tty)
+        fprintf(stderr, "\r%s", g_ui.color ? "\x1b[K"
+                : "                                                            \r");
+}
+
+/* Render the in-place status line. `tick` advances the spinner. */
+static void status_render(bridge_t *b, uint64_t tick) {
+    if (!g_ui.status_tty) return;
+    char up[32], moves[32];
+    ui_humanize_uptime((mono_ms() - b->start_ms) / 1000u, up, sizeof up);
+    ui_group_thousands(b->ferrum_moves, moves, sizeof moves);
+    const char *health = ui_link_health(b->probe_ok, b->probe_fail);
+    const char *hcol = (health[0] == 'o') ? c_grn() :
+                       (health[0] == 'd') ? c_red() : c_yel();
+    const char *dot = g_ui.utf8 ? "\xc2\xb7" : "-";
+    char spinbuf[4];
+    if (g_ui.utf8) snprintf(spinbuf, sizeof spinbuf, "%s", ui_spinner_braille(tick));
+    else { spinbuf[0] = ui_spinner_ascii(tick); spinbuf[1] = '\0'; }
+    fprintf(stderr, "\r%s%s running%s %s %s %s moves %s link %s%s%s%s",
+            c_dim(), spinbuf, c_rst(),
+            up, dot, moves, dot,
+            hcol, health, c_rst(),
+            g_ui.color ? "\x1b[K" : "   ");
+    fflush(stderr);
+}
+
 /* ── main ───────────────────────────────────────────────────────────────── */
 
 int main(int argc, char **argv) {
@@ -807,6 +833,10 @@ int main(int argc, char **argv) {
     uint8_t  diag_pos = 0;
     uint64_t last_heartbeat_ms = br.start_ms;
     const uint64_t HEARTBEAT_PERIOD_MS = 5000;
+    uint64_t last_status_ms = br.start_ms;
+    uint64_t spin_tick = 0;
+    const uint64_t STATUS_PERIOD_MS = 125;
+    const char *last_health = ui_link_health(br.probe_ok, br.probe_fail);
 
     while (!g_stop) {
         int n = vp_read(br.vp, buf, sizeof(buf));
@@ -865,20 +895,38 @@ int main(int argc, char **argv) {
         if (drained > 0) br.hurra_rx_bytes += (uint64_t)drained;
 
         uint64_t now = mono_ms();
-        if (now - last_heartbeat_ms >= HEARTBEAT_PERIOD_MS) {
-            last_heartbeat_ms = now;
-            blog("heartbeat up=%llus  moves=%llu  probes=%u(ok=%u fail=%u)  "
-                 "rx_bytes=%llu  fw=%s",
-                 (unsigned long long)((now - br.start_ms) / 1000),
-                 (unsigned long long)br.ferrum_moves,
-                 (unsigned)br.probe_calls,
-                 (unsigned)br.probe_ok,
-                 (unsigned)br.probe_fail,
-                 (unsigned long long)br.hurra_rx_bytes,
-                 (br.probe_fail == 0 && br.probe_ok > 0) ? "ok" :
-                 (br.probe_ok == 0 && br.probe_fail > 0) ? "DEAD" :
-                 (br.probe_ok > 0 && br.probe_fail > 0)  ? "flapping" :
-                                                           "unknown");
+
+        /* Detect link-health transitions and print an event line above the
+         * status line so scrollback keeps a trail. */
+        const char *health = ui_link_health(br.probe_ok, br.probe_fail);
+        if (strcmp(health, last_health) != 0) {
+            status_clear();
+            if (strcmp(health, "ok") == 0)
+                fprintf(stderr, "%s%s firmware responding%s\n", c_grn(), g_ok(), c_rst());
+            else if (strcmp(health, "dead") == 0)
+                fprintf(stderr, "%s%s firmware stopped responding%s\n", c_red(), g_bad(), c_rst());
+            else if (strcmp(health, "flapping") == 0)
+                fprintf(stderr, "%s~ firmware link is flapping%s\n", c_yel(), c_rst());
+            fflush(stderr);
+            last_health = health;
+        }
+
+        if (g_ui.status_tty) {
+            if (now - last_status_ms >= STATUS_PERIOD_MS) {
+                last_status_ms = now;
+                status_render(&br, spin_tick++);
+            }
+        } else {
+            /* Non-TTY: keep a periodic plain heartbeat line for logs. */
+            if (now - last_heartbeat_ms >= HEARTBEAT_PERIOD_MS) {
+                last_heartbeat_ms = now;
+                char up[32], moves[32];
+                ui_humanize_uptime((now - br.start_ms) / 1000u, up, sizeof up);
+                ui_group_thousands(br.ferrum_moves, moves, sizeof moves);
+                fprintf(stderr, "hurra-bridge: up %s, %s moves, link %s\n",
+                        up, moves, ui_link_health(br.probe_ok, br.probe_fail));
+                fflush(stderr);
+            }
         }
 
         /* Flush batched TX each tick so the firmware sees commands within ~500us. */
