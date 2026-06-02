@@ -17,6 +17,7 @@
 #include "virtual_port.h"
 #include "ui_util.h"
 
+#include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -34,6 +35,7 @@
 #  include <unistd.h>
 #  include <time.h>
 #  include <glob.h>
+#  include <fcntl.h>       /* open, O_RDWR for diag_open_errno */
 #  define HOME_ENV "HOME"
 #endif
 
@@ -180,6 +182,27 @@ static const char *c_rst(void)   { return g_ui.color ? "\x1b[0m"  : ""; }
 /* Status glyphs degrade to ASCII when utf8 is off. */
 static const char *g_ok(void)   { return g_ui.utf8 ? "\xe2\x9c\x93" : "*"; } /* check */
 static const char *g_bad(void)  { return g_ui.utf8 ? "\xe2\x9c\x97" : "x"; } /* cross */
+
+/* Print a friendly, optionally-colored fatal error and return an exit code.
+ * Format: "<x> <headline>\n  <cause/help lines...>". `body` may be multi-line. */
+static int bridge_fail(int code, const char *headline, const char *body) {
+    fprintf(stderr, "%s%s %s%s\n", c_red(), g_bad(), headline, c_rst());
+    if (body && *body) fprintf(stderr, "%s%s%s\n", c_dim(), body, c_rst());
+    fflush(stderr);
+    return code;
+}
+
+#ifndef _WIN32
+/* Re-open the device purely to capture a reliable errno (the real open path
+ * frees/sleeps in between, clobbering errno before we can read it). Returns
+ * the errno from a fresh open; 0 on success. */
+static int diag_open_errno(const char *path) {
+    errno = 0;
+    int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
+    if (fd >= 0) { close(fd); return 0; }
+    return errno;
+}
+#endif
 
 /* ── Hurra telemetry → Ferrum text ──────────────────────────────────────── */
 
@@ -488,7 +511,7 @@ static size_t discover_devices(dev_cand_t *out, size_t max) {
     };
     size_t n = 0;
     for (size_t gi = 0; gi < sizeof(globs)/sizeof(globs[0]) && n < max; gi++) {
-        glob_t gl;
+        glob_t gl = {0};
         if (glob(globs[gi], 0, NULL, &gl) == 0) {
             for (size_t i = 0; i < gl.gl_pathc && n < max; i++) {
                 /* Skip duplicates already collected. */
@@ -537,28 +560,72 @@ int main(int argc, char **argv) {
 
     br.hc = hurra_open(args.device, args.baud);
     if (!br.hc) {
-        blog("error: hurra_open(%s, %u) failed", args.device, (unsigned)args.baud);
-        return 1;
+        char head[320], body[640];
+#ifndef _WIN32
+        int e = diag_open_errno(args.device);
+        switch (ui_open_category(e)) {
+        case UI_OPEN_NOENT: {
+            dev_cand_t cands[8];
+            size_t nc = discover_devices(cands, 8);
+            char list[512] = "    (none found)";
+            if (nc) {
+                int o = 0;
+                for (size_t i = 0; i < nc; i++)
+                    o += snprintf(list + o, sizeof(list) - (size_t)o, "%s    %s%s",
+                                  i ? "\n" : "", cands[i].path,
+                                  cands[i].wch ? "   (WCH USB-serial)" : "");
+            }
+            snprintf(head, sizeof head, "Can't open serial device: %s", args.device);
+            snprintf(body, sizeof body,
+                "  No such device. Is it plugged in?\n"
+                "  -> Available serial ports:\n%s", list);
+            break;
+        }
+        case UI_OPEN_ACCES:
+            snprintf(head, sizeof head, "Permission denied: %s", args.device);
+            snprintf(body, sizeof body,
+                "  Your user isn't allowed to use this serial port.\n"
+                "  -> Add yourself to the 'dialout' group, then log out and back in:\n"
+                "       sudo usermod -aG dialout $USER");
+            break;
+        case UI_OPEN_BUSY:
+            snprintf(head, sizeof head, "Device is in use: %s", args.device);
+            snprintf(body, sizeof body,
+                "  Another program (another bridge instance?) already holds this port.");
+            break;
+        default:
+            snprintf(head, sizeof head, "Can't open serial device: %s", args.device);
+            snprintf(body, sizeof body, "  %s", e ? strerror(e) : "open failed");
+            break;
+        }
+#else
+        snprintf(head, sizeof head, "Can't open serial device: %s", args.device);
+        snprintf(body, sizeof body, "  The device couldn't be opened (in use, missing, or wrong COM name).");
+#endif
+        return bridge_fail(1, head, body);
     }
-    blog("hurra: opened %s @ %u baud", args.device, (unsigned)args.baud);
 
     /* Pack multiple small frames into one 64-byte USB transfer (CH343B MPS).
      * Flushed at the end of every loop tick for bounded latency. */
     hurra_set_tx_batch(br.hc, 64);
-    blog("hurra: tx_batch=64 bytes (CH343B MPS); flushed every main-loop tick");
 
 #ifdef _WIN32
     if (!args.virtual_port) {
-        blog("error: --virtual-port is required on Windows");
         hurra_close(br.hc);
-        return 1;
+        return bridge_fail(1, "No --virtual-port given (required on Windows)",
+            "  hurra-bridge needs a com0com virtual COM pair.\n"
+            "  -> Install com0com, create a pair with setupc.exe (e.g. CNCA0 <-> CNCB0),\n"
+            "     then run:  hurra-bridge.exe --device COM5 --virtual-port CNCA0");
     }
     br.vp = vp_open(args.virtual_port, NULL);
     if (!br.vp) {
-        blog("error: vp_open(%s) failed (GetLastError=%lu)",
-             args.virtual_port, (unsigned long)GetLastError());
+        char body[256];
+        snprintf(body, sizeof body,
+            "  Couldn't open com0com port '%s' (GetLastError=%lu).\n"
+            "  -> Is the name correct and the com0com pair installed?",
+            args.virtual_port, (unsigned long)GetLastError());
         hurra_close(br.hc);
-        return 1;
+        return bridge_fail(1, "Can't open virtual COM port", body);
     }
     blog("vp: opened %s", args.virtual_port);
 #else
@@ -570,10 +637,11 @@ int main(int argc, char **argv) {
     }
     br.vp = vp_open(NULL, link);
     if (!br.vp) {
-        blog("error: vp_open failed");
         free(owned_link);
         hurra_close(br.hc);
-        return 1;
+        return bridge_fail(1, "Can't create the virtual serial port (PTY)",
+            "  The kernel refused to allocate a pseudo-terminal.\n"
+            "  -> This is unusual; check ulimits and that /dev/ptmx is accessible.");
     }
     const char *slave = vp_slave_path(br.vp);
     printf("PTY: %s\n", slave ? slave : "(unknown)");
