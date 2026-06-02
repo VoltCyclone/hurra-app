@@ -204,6 +204,12 @@ static int diag_open_errno(const char *path) {
 }
 #endif
 
+/* Print the aligned startup banner head (TTY) or a plain line (non-TTY). */
+static void print_banner_head(void) {
+    if (g_ui.status_tty) fprintf(stderr, "\nhurra-bridge\n\n");
+    else                 fprintf(stderr, "hurra-bridge: starting\n");
+}
+
 /* ── Hurra telemetry → Ferrum text ──────────────────────────────────────── */
 
 static void on_tlm_buttons(uint8_t type, const uint8_t *data,
@@ -558,6 +564,36 @@ int main(int argc, char **argv) {
     memset(&br, 0, sizeof(br));
     br.request_timeout_ms = args.timeout_ms;
 
+#ifndef _WIN32
+    char auto_dev[256] = {0};
+    bool device_auto = false;
+    if (!args.device) {
+        dev_cand_t cands[8];
+        size_t nc = discover_devices(cands, 8);
+        if (nc == 1) {
+            snprintf(auto_dev, sizeof auto_dev, "%s", cands[0].path);
+            args.device = auto_dev;
+            device_auto = true;
+        } else if (nc == 0) {
+            return bridge_fail(2, "No serial devices found. Is the device plugged in?",
+                "  (Looked for the usual /dev/cu.* / /dev/tty* serial ports.)\n"
+                "  -> If it's plugged in but not listed, you may need the WCH CH34x driver.");
+        } else {
+            char list[512]; int o = 0;
+            for (size_t i = 0; i < nc; i++)
+                o += snprintf(list + o, sizeof(list) - (size_t)o, "%s      %s%s",
+                              i ? "\n" : "", cands[i].path,
+                              cands[i].wch ? "   (WCH USB-serial)" : "");
+            char body[700];
+            snprintf(body, sizeof body,
+                "  Found several serial ports:\n%s\n"
+                "  -> Re-run with one, e.g.:\n       hurra-bridge --device %s",
+                list, cands[0].path);
+            return bridge_fail(2, "No --device given, and found several serial ports", body);
+        }
+    }
+#endif
+
     br.hc = hurra_open(args.device, args.baud);
     if (!br.hc) {
         char head[320], body[640];
@@ -627,7 +663,17 @@ int main(int argc, char **argv) {
         hurra_close(br.hc);
         return bridge_fail(1, "Can't open virtual COM port", body);
     }
-    blog("vp: opened %s", args.virtual_port);
+
+    /* ---- Banner ---- */
+    print_banner_head();
+    {
+        char baudbuf[32];
+        ui_humanize_baud(args.baud, baudbuf, sizeof baudbuf);
+        fprintf(stderr, "  %s%s%s Serial device   %s @ %s\n",
+                c_grn(), g_ok(), c_rst(), args.device, baudbuf);
+        fprintf(stderr, "  %s%s%s Virtual port    %s\n",
+                c_grn(), g_ok(), c_rst(), args.virtual_port);
+    }
 #else
     char *owned_link = NULL;
     const char *link = args.link_path;
@@ -644,11 +690,47 @@ int main(int argc, char **argv) {
             "  -> This is unusual; check ulimits and that /dev/ptmx is accessible.");
     }
     const char *slave = vp_slave_path(br.vp);
-    printf("PTY: %s\n", slave ? slave : "(unknown)");
-    if (link) printf("Symlink: %s\n", link);
-    fflush(stdout);
+
+    /* ---- Banner ---- */
+    print_banner_head();
+    {
+        char baudbuf[32];
+        ui_humanize_baud(args.baud, baudbuf, sizeof baudbuf);
+        fprintf(stderr, "  %s%s%s Serial device   %s @ %s%s\n",
+                c_grn(), g_ok(), c_rst(), args.device, baudbuf,
+                device_auto ? "  (auto-detected)" : "");
+        fprintf(stderr, "  %s%s%s Virtual port    %s\n",
+                c_grn(), g_ok(), c_rst(), slave ? slave : "(unknown)");
+        if (link)
+            fprintf(stderr, "    %s\xe2\x94\x94 linked at%s     %s\n",
+                    c_dim(), c_rst(), link);
+    }
     free(owned_link);
 #endif
+
+    /* Initial firmware probe — non-fatal. Updates probe counters. */
+    {
+        char fw[64] = {0};
+        int rc = hurra_version(br.hc, fw, sizeof fw, 250);
+        br.probe_calls++;
+        if (rc == 0) {
+            br.probe_ok++;
+            fprintf(stderr, "  %s%s%s Firmware        responding (fw \"%s\")\n",
+                    c_grn(), g_ok(), c_rst(), fw);
+        } else {
+            br.probe_fail++;
+            fprintf(stderr, "  %s%s%s Firmware        not responding%s\n",
+                    c_red(), g_bad(), c_rst(), "");
+            fprintf(stderr, "%s"
+                "    The serial port opened, but the device isn't answering.\n"
+                "    Likely causes:\n"
+                "      - Wrong baud rate (firmware default is 4 Mbaud; try without --baud)\n"
+                "      - USB-serial driver too slow for 4 Mbaud\n"
+                "        (macOS: install the WCH CH34x VCP driver)\n"
+                "      - Wrong device - this port may be something else%s\n",
+                c_dim(), c_rst());
+        }
+    }
 
     (void)hurra_on_telemetry(br.hc, HURRA_TYPE_TLM_BUTTONS, on_tlm_buttons, &br);
     (void)hurra_on_telemetry(br.hc, HURRA_TYPE_TLM_AXIS,    on_tlm_axis,    &br);
@@ -691,7 +773,18 @@ int main(int argc, char **argv) {
     }
 
     br.start_ms = mono_ms();
-    blog("bridge: running. SIGINT to stop.");
+#ifndef _WIN32
+    {
+        const char *slave2 = vp_slave_path(br.vp);
+        fprintf(stderr, "\n  Ready. Point your Ferrum tool at %s\n",
+                (args.link_path ? args.link_path :
+                 (slave2 ? slave2 : "the PTY")));
+    }
+#else
+    fprintf(stderr, "\n  Ready. Point your Ferrum tool at the other end of the com0com pair.\n");
+#endif
+    fprintf(stderr, "  Press Ctrl-C to stop.\n\n");
+    fflush(stderr);
 
     uint8_t buf[256];
     /* __diag__ side-channel: intercept lines that exactly match "__diag__"
