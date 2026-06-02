@@ -59,6 +59,12 @@ static void test_spinner(void) {
     if (ui_spinner_ascii(0) != '|') { printf("FAIL spin0\n"); g_fail = 1; }
     if (ui_spinner_ascii(1) != '/') { printf("FAIL spin1\n"); g_fail = 1; }
     if (ui_spinner_ascii(4) != '|') { printf("FAIL spin4 wrap\n"); g_fail = 1; }
+    if (ui_spinner_ascii(2) != '-')  { printf("FAIL spin2\n");  g_fail = 1; }
+    if (ui_spinner_ascii(3) != '\\') { printf("FAIL spin3\n");  g_fail = 1; }
+    /* Braille frames: each is a valid 3-byte UTF-8 sequence and wraps at 10. */
+    if (strcmp(ui_spinner_braille(0), "\xe2\xa0\x8b") != 0) { printf("FAIL braille0\n"); g_fail = 1; }
+    if (strlen(ui_spinner_braille(7)) != 3) { printf("FAIL braille_len\n"); g_fail = 1; }
+    if (strcmp(ui_spinner_braille(10), ui_spinner_braille(0)) != 0) { printf("FAIL braille_wrap\n"); g_fail = 1; }
 }
 
 int main(void) {
