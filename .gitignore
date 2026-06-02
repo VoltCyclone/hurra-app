@@ -10,3 +10,4 @@ build/
 .vscode/
 .idea/
 compile_commands.json
+.claude/
