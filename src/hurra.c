@@ -497,6 +497,9 @@ int hurra_silent_move(hurra_client_t *c, int16_t dx, int16_t dy) {
     uint8_t p[4]; put_i16le(&p[0], dx); put_i16le(&p[2], dy);
     return send_oneway(c, HURRA_TYPE_MOUSE_SILENT_MOVE, p, sizeof(p));
 }
+int hurra_human(hurra_client_t *c, uint8_t level) {
+    return send_oneway(c, HURRA_TYPE_HUMAN, &level, 1);
+}
 int hurra_mo(hurra_client_t *c, uint8_t buttons,
              int16_t dx, int16_t dy, int8_t wheel, int8_t pan, int8_t tilt) {
     uint8_t p[8];

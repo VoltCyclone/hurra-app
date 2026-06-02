@@ -53,9 +53,10 @@ typedef struct {
     void (*on_kb_mask_set)    (uint8_t hid, uint8_t state, void *user);
     void (*on_kb_mask_get)    (uint8_t hid, void *user);
 
-    /* Init / baud */
+    /* Init / baud / humanization */
     void (*on_init)           (void *user);
     void (*on_baud)           (uint32_t baud, void *user);
+    void (*on_human)          (uint32_t level, void *user);
 
     /* Callback toggles */
     void (*on_cb_buttons_set) (uint8_t enable, void *user);

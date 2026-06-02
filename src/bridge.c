@@ -300,6 +300,11 @@ static void cb_baud(uint32_t baud, void *user) {
     (void)hurra_set_baud(b->hc, baud, b->request_timeout_ms);
 }
 
+static void cb_human(uint32_t level, void *user) {
+    bridge_t *b = (bridge_t *)user;
+    (void)hurra_human(b->hc, (uint8_t)level);
+}
+
 /* CB toggles: track local enable state and propagate to firmware. */
 static void cb_cb_buttons_set(uint8_t enable, void *user) {
     bridge_t *b = (bridge_t *)user;
@@ -483,6 +488,7 @@ int main(int argc, char **argv) {
     cbs.on_kb_mask_get    = cb_kb_mask_get;
     cbs.on_init           = cb_init;
     cbs.on_baud           = cb_baud;
+    cbs.on_human          = cb_human;
     cbs.on_cb_buttons_set = cb_cb_buttons_set;
     cbs.on_cb_buttons_get = cb_cb_buttons_get;
     cbs.on_cb_axes_set    = cb_cb_axes_set;

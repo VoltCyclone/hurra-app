@@ -328,6 +328,15 @@ static void cmd_baud(ferrum_parser_t *p, arg_t *args, uint8_t nargs) {
     if (p->cbs.on_baud) p->cbs.on_baud((uint32_t)n, p->user);
 }
 
+static void cmd_human(ferrum_parser_t *p, arg_t *args, uint8_t nargs) {
+    if (nargs != 1) return;
+    int32_t n;
+    if (!parse_int(args[0].p, args[0].len, &n)) return;
+    if (n < 0) n = 0;
+    if (n > 3) n = 3;
+    if (p->cbs.on_human) p->cbs.on_human((uint32_t)n, p->user);
+}
+
 static void cmd_cb_toggle(ferrum_parser_t *p,
                           void (*on_set)(uint8_t, void *),
                           void (*on_get)(void *),
@@ -399,6 +408,7 @@ static void dispatch(ferrum_parser_t *p, const char *name, uint8_t name_len,
     }
 
     if (name_is(name, name_len, "baud"))      { cmd_baud(p, args, nargs); return; }
+    if (name_is(name, name_len, "human"))     { cmd_human(p, args, nargs); return; }
 
     /* Unknown → silent drop, matching ferrum.c. */
 }

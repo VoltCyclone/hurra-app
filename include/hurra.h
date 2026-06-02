@@ -80,6 +80,7 @@ int  hurra_flush(hurra_client_t *c);
 int hurra_move        (hurra_client_t *c, int16_t dx, int16_t dy);
 int hurra_move_smooth (hurra_client_t *c, int16_t dx, int16_t dy);
 int hurra_silent_move (hurra_client_t *c, int16_t dx, int16_t dy);
+int hurra_human       (hurra_client_t *c, uint8_t level);
 int hurra_mo          (hurra_client_t *c, uint8_t buttons,
                        int16_t dx, int16_t dy,
                        int8_t wheel, int8_t pan, int8_t tilt);

@@ -37,6 +37,7 @@ extern "C" {
 #define HURRA_TYPE_INVERT_X           0x17
 #define HURRA_TYPE_INVERT_Y           0x18
 #define HURRA_TYPE_SWAP_XY            0x19
+#define HURRA_TYPE_HUMAN              0x1A
 #define HURRA_TYPE_BTN_LEFT           0x20
 #define HURRA_TYPE_BTN_RIGHT          0x21
 #define HURRA_TYPE_BTN_MIDDLE         0x22
