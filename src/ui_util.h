@@ -39,11 +39,15 @@ static inline char *ui_humanize_uptime(uint64_t secs, char *buf, size_t n) {
 static inline char *ui_group_thousands(uint64_t v, char *buf, size_t n) {
     char tmp[32];
     int len = snprintf(tmp, sizeof tmp, "%llu", (unsigned long long)v);
-    int out = 0, since = len % 3 == 0 ? 3 : len % 3;
+    int out = 0, until_sep = len % 3 == 0 ? 3 : len % 3;
     for (int i = 0; i < len && out < (int)n - 1; i++) {
-        if (i && since == 0) { buf[out++] = ','; since = 3; if (out >= (int)n - 1) break; }
+        if (i && until_sep == 0) {
+            buf[out++] = ',';
+            until_sep = 3;
+            if (out >= (int)n - 1) { out--; break; }  /* no room for next digit; drop trailing comma */
+        }
         buf[out++] = tmp[i];
-        since--;
+        until_sep--;
     }
     buf[out] = '\0';
     return buf;

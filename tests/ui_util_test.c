@@ -37,6 +37,7 @@ static void test_group_thousands(void) {
     CHECK_STR((ui_group_thousands(12480, buf, sizeof buf), buf), "12,480");
     CHECK_STR((ui_group_thousands(1000,  buf, sizeof buf), buf), "1,000");
     CHECK_STR((ui_group_thousands(999,   buf, sizeof buf), buf), "999");
+    CHECK_STR((ui_group_thousands(1000000, buf, sizeof buf), buf), "1,000,000");
 }
 
 int main(void) {
