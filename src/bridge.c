@@ -398,16 +398,23 @@ static void cb_cb_keys_get(void *user) {
 
 static void usage(const char *prog) {
     fprintf(stderr,
-        "usage: %s --device PATH [--baud N] [--link PATH] [--virtual-port NAME]\n"
+        "hurra-bridge — Ferrum-compatible bridge to Hurra firmware\n"
         "\n"
-        "  --device PATH        Real serial device path (e.g. /dev/cu.usbmodem01,\n"
-        "                       COM5). Required.\n"
-        "  --baud N             Real serial baud rate. Default 4000000.\n"
-        "  --link PATH          Symlink to point at the PTY slave (Unix only).\n"
-        "                       Default $%s/.hurra-bridge.tty.\n"
-        "  --virtual-port NAME  com0com COM name the bridge opens (Windows).\n"
-        "                       Ignored on Unix.\n"
-        "  --timeout-ms N       Per-request timeout for get-style commands. Default 250.\n",
+        "usage: %s [--device PATH] [--baud N] [--link PATH]\n"
+        "                   [--virtual-port NAME] [--timeout-ms N] [--no-color]\n"
+        "\n"
+        "  --device PATH        Real serial device (e.g. /dev/cu.usbmodem01, COM5).\n"
+#ifdef _WIN32
+        "                       Required on Windows.\n"
+#else
+        "                       Optional: auto-detected when exactly one port is found.\n"
+#endif
+        "  --baud N             Real-link baud rate. Default 4000000 (4 Mbaud).\n"
+        "  --link PATH          Symlink to the PTY slave (Unix). Default $%s/.hurra-bridge.tty.\n"
+        "  --virtual-port NAME  com0com COM name to open (Windows; required there).\n"
+        "  --timeout-ms N       Per-request timeout for get-style commands. Default 250.\n"
+        "  --no-color           Disable colored output (also honors NO_COLOR env).\n"
+        "  -h, --help           Show this help and exit.\n",
         prog, HOME_ENV);
 }
 
@@ -435,10 +442,20 @@ static int parse_args(int argc, char **argv, args_t *out) {
         else if (!strcmp(a, "--link") && i + 1 < argc)    out->link_path = argv[++i];
         else if (!strcmp(a, "--virtual-port") && i + 1 < argc) out->virtual_port = argv[++i];
         else if (!strcmp(a, "--timeout-ms") && i + 1 < argc)   out->timeout_ms = atoi(argv[++i]);
+        else if (!strcmp(a, "--no-color"))                out->no_color = true;
         else if (!strcmp(a, "-h") || !strcmp(a, "--help")) { usage(argv[0]); return -1; }
-        else { fprintf(stderr, "unknown arg: %s\n", a); usage(argv[0]); return -1; }
+        else { fprintf(stderr, "%s%s unknown option: %s%s\n",
+                       c_red(), g_bad(), a, c_rst()); usage(argv[0]); return -1; }
     }
-    if (!out->device) { fprintf(stderr, "missing --device\n"); usage(argv[0]); return -1; }
+#ifdef _WIN32
+    if (!out->device) {
+        fprintf(stderr, "%s%s --device is required on Windows%s\n",
+                c_red(), g_bad(), c_rst());
+        usage(argv[0]);
+        return -1;
+    }
+#endif
+    /* On Unix, a missing --device triggers auto-discovery in main() (Task 7). */
     return 0;
 }
 
