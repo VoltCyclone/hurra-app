@@ -937,7 +937,22 @@ int main(int argc, char **argv) {
         }
     }
 
-    blog("bridge: stopping.");
+    status_clear();
+    if (g_ui.status_tty) fprintf(stderr, "\n");
+    {
+        char up[32], moves[32];
+        ui_humanize_uptime((mono_ms() - br.start_ms) / 1000u, up, sizeof up);
+        ui_group_thousands(br.ferrum_moves, moves, sizeof moves);
+        const char *health = ui_link_health(br.probe_ok, br.probe_fail);
+        const char *final_h = (strcmp(health, "ok") == 0)       ? "firmware link ok" :
+                              (strcmp(health, "dead") == 0)     ? "firmware was unreachable" :
+                              (strcmp(health, "flapping") == 0) ? "firmware link flapped" :
+                                                                  "firmware link unknown";
+        const char *dot = g_ui.utf8 ? "\xc2\xb7" : "-";
+        fprintf(stderr, "Stopping hurra-bridge.\n  Ran for %s %s %s moves %s %s\n",
+                up, dot, moves, dot, final_h);
+        fflush(stderr);
+    }
     ferrum_parser_destroy(br.parser);
     vp_close(br.vp);
     hurra_close(br.hc);
