@@ -151,27 +151,6 @@ void TF_WriteImpl(TinyFrame *tf, const uint8_t *buf, uint32_t len) {
     hurra_client_t *c = tls_active_client;
     if (!c || !c->port) return;
 
-    static uint64_t total_tx = 0;
-    static uint32_t frame_n  = 0;
-    if (frame_n < 5) {
-        char hex[128];
-        size_t hn = (len < 32) ? len : 32;
-        for (size_t i = 0; i < hn; i++) {
-            snprintf(hex + i*3, sizeof(hex) - i*3, "%02x ", buf[i]);
-        }
-        fprintf(stderr, "TX[%u] %u bytes: %s%s\n",
-                (unsigned)frame_n, (unsigned)len, hex,
-                len > 32 ? "..." : "");
-        fflush(stderr);
-    }
-    frame_n++;
-    total_tx += len;
-    if ((frame_n & 0x3FF) == 0) {
-        fprintf(stderr, "TX cumulative: frames=%u bytes=%llu\n",
-                (unsigned)frame_n, (unsigned long long)total_tx);
-        fflush(stderr);
-    }
-
     /* Immediate-flush mode. */
     if (c->tx_batch_target == 0) {
         size_t off = 0;
@@ -433,24 +412,10 @@ int hurra_poll(hurra_client_t *c) {
     if (!c) return -1;
     uint8_t buf[512];
     int total = 0;
-    static uint64_t total_rx = 0;
-    static int      saw_any  = 0;
     for (;;) {
         int n = serial_read(c->port, buf, sizeof(buf));
         if (n < 0) return -1;
         if (n == 0) break;
-        if (!saw_any) {
-            saw_any = 1;
-            char hex[160];
-            size_t hn = ((size_t)n < 48) ? (size_t)n : 48;
-            for (size_t i = 0; i < hn; i++) {
-                snprintf(hex + i*3, sizeof(hex) - i*3, "%02x ", buf[i]);
-            }
-            fprintf(stderr, "RX first chunk: %d bytes: %s%s\n",
-                    n, hex, n > 48 ? "..." : "");
-            fflush(stderr);
-        }
-        total_rx += (uint64_t)n;
         hurra_mutex_lock(&c->mu);
         tls_active_client = c;
         TF_Accept(&c->tf, buf, (uint32_t)n);
