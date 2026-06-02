@@ -15,6 +15,7 @@
 #include "hurra.h"
 #include "hurra_types.h"
 #include "virtual_port.h"
+#include "ui_util.h"
 
 #include <signal.h>
 #include <stdarg.h>
@@ -118,6 +119,65 @@ static void blog(const char *fmt, ...) {
     fprintf(stderr, "\n");
     fflush(stderr);
 }
+
+/* ── Terminal UI layer ──────────────────────────────────────────────────────
+ * Capability is detected once in ui_init(); every decoration checks g_ui. */
+
+static struct {
+    bool color;       /* color/VT escapes allowed */
+    bool status_tty;  /* stdout is a live terminal (in-place status line ok) */
+    bool utf8;        /* safe to emit the Braille spinner / box glyphs */
+} g_ui;
+
+#ifdef _WIN32
+static int ui_isatty_fd(FILE *f) { return _isatty(_fileno(f)); }
+#else
+static int ui_isatty_fd(FILE *f) { return isatty(fileno(f)); }
+#endif
+
+/* Resolve color/status/utf8 from args + environment + TTY state. */
+static void ui_init(bool no_color_flag) {
+    bool stderr_tty = ui_isatty_fd(stderr) != 0;
+    bool stdout_tty = ui_isatty_fd(stdout) != 0;
+    const char *nc  = getenv("NO_COLOR");
+    bool no_color   = no_color_flag || (nc && *nc);
+
+    g_ui.color      = stderr_tty && !no_color;
+    g_ui.status_tty = stdout_tty;
+
+#ifdef _WIN32
+    g_ui.utf8 = false; /* keep ASCII spinner/markers on Windows consoles */
+    if (g_ui.color) {
+        HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+        DWORD mode = 0;
+        if (h == INVALID_HANDLE_VALUE || !GetConsoleMode(h, &mode) ||
+            !SetConsoleMode(h, mode | 0x0004 /*ENABLE_VIRTUAL_TERMINAL_PROCESSING*/)) {
+            g_ui.color = false; /* terminal can't do VT; stay plain */
+        }
+    }
+#else
+    {
+        /* Trust UTF-8 when color is on and locale looks UTF-8-ish. */
+        const char *lc = getenv("LC_ALL");
+        if (!lc || !*lc) lc = getenv("LC_CTYPE");
+        if (!lc || !*lc) lc = getenv("LANG");
+        g_ui.utf8 = g_ui.color && lc &&
+                    (strstr(lc, "UTF-8") || strstr(lc, "UTF8") ||
+                     strstr(lc, "utf-8") || strstr(lc, "utf8"));
+    }
+#endif
+}
+
+/* Color wrappers: return the escape only when color is enabled, else "". */
+static const char *c_red(void)   { return g_ui.color ? "\x1b[31m" : ""; }
+static const char *c_grn(void)   { return g_ui.color ? "\x1b[32m" : ""; }
+static const char *c_yel(void)   { return g_ui.color ? "\x1b[33m" : ""; }
+static const char *c_dim(void)   { return g_ui.color ? "\x1b[2m"  : ""; }
+static const char *c_rst(void)   { return g_ui.color ? "\x1b[0m"  : ""; }
+
+/* Status glyphs degrade to ASCII when utf8 is off. */
+static const char *g_ok(void)   { return g_ui.utf8 ? "\xe2\x9c\x93" : "*"; } /* check */
+static const char *g_bad(void)  { return g_ui.utf8 ? "\xe2\x9c\x97" : "x"; } /* cross */
 
 /* ── Hurra telemetry → Ferrum text ──────────────────────────────────────── */
 
@@ -357,6 +417,7 @@ typedef struct {
     const char *link_path;       /* Unix only */
     const char *virtual_port;    /* Windows only */
     int         timeout_ms;
+    bool        no_color;        /* --no-color: force-disable color */
 } args_t;
 
 static int parse_args(int argc, char **argv, args_t *out) {
@@ -365,6 +426,7 @@ static int parse_args(int argc, char **argv, args_t *out) {
     out->link_path = NULL;
     out->virtual_port = NULL;
     out->timeout_ms = 250;
+    out->no_color = false;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -409,6 +471,8 @@ static void sleep_us(unsigned us) {
 int main(int argc, char **argv) {
     args_t args;
     if (parse_args(argc, argv, &args) != 0) return 2;
+
+    ui_init(args.no_color);
 
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
