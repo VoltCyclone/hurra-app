@@ -534,6 +534,20 @@ static size_t discover_devices(dev_cand_t *out, size_t max) {
     }
     return n;
 }
+
+/* Append formatted text to buf[cap] starting at *off, clamping so *off never
+ * exceeds cap-1. No-op once the buffer is full. Keeps multi-append loops safe. */
+static void str_appendf(char *buf, size_t cap, int *off, const char *fmt, ...) {
+    if (*off < 0) *off = 0;
+    if ((size_t)*off >= cap) return;            /* full; nothing more fits */
+    va_list ap;
+    va_start(ap, fmt);
+    int w = vsnprintf(buf + *off, cap - (size_t)*off, fmt, ap);
+    va_end(ap);
+    if (w < 0) return;                          /* encoding error; leave *off */
+    *off += w;
+    if ((size_t)*off >= cap) *off = (int)cap - 1; /* clamp to last valid index */
+}
 #endif /* !_WIN32 */
 
 /* ── Sleep ──────────────────────────────────────────────────────────────── */
@@ -581,11 +595,11 @@ int main(int argc, char **argv) {
         } else {
             char list[512]; int o = 0;
             for (size_t i = 0; i < nc; i++)
-                o += snprintf(list + o, sizeof(list) - (size_t)o, "%s      %s%s",
-                              i ? "\n" : "", cands[i].path,
-                              cands[i].wch ? "   (WCH USB-serial)" : "");
-            char body[700];
-            snprintf(body, sizeof body,
+                str_appendf(list, sizeof list, &o, "%s      %s%s",
+                            i ? "\n" : "", cands[i].path,
+                            cands[i].wch ? "   (WCH USB-serial)" : "");
+            char body[700]; int bo = 0;
+            str_appendf(body, sizeof body, &bo,
                 "  Found several serial ports:\n%s\n"
                 "  -> Re-run with one, e.g.:\n       hurra-bridge --device %s",
                 list, cands[0].path);
@@ -607,9 +621,9 @@ int main(int argc, char **argv) {
             if (nc) {
                 int o = 0;
                 for (size_t i = 0; i < nc; i++)
-                    o += snprintf(list + o, sizeof(list) - (size_t)o, "%s    %s%s",
-                                  i ? "\n" : "", cands[i].path,
-                                  cands[i].wch ? "   (WCH USB-serial)" : "");
+                    str_appendf(list, sizeof list, &o, "%s    %s%s",
+                                i ? "\n" : "", cands[i].path,
+                                cands[i].wch ? "   (WCH USB-serial)" : "");
             }
             snprintf(head, sizeof head, "Can't open serial device: %s", args.device);
             snprintf(body, sizeof body,
