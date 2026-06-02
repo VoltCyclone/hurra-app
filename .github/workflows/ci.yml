@@ -19,3 +19,15 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: Upload hurra-bridge binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: hurra-bridge-${{ matrix.os }}
+          # Single-config generators (Make/Ninja) emit build/; MSVC emits
+          # build/Release/. At least one must match or the job fails.
+          path: |
+            build/hurra-bridge
+            build/hurra-bridge.exe
+            build/Release/hurra-bridge.exe
+          if-no-files-found: error
