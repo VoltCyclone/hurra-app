@@ -585,7 +585,7 @@ static void status_render(bridge_t *b, uint64_t tick) {
             c_dim(), spinbuf, c_rst(),
             up, dot, moves, dot,
             hcol, health, c_rst(),
-            g_ui.color ? "\x1b[K" : "   ");
+            g_ui.color ? "\x1b[K" : "            ");
     fflush(stderr);
 }
 
