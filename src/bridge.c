@@ -124,6 +124,10 @@ static void blog(const char *fmt, ...) {
     fflush(stderr);
 }
 
+/* Forward decl: defined just before main(); needed by cb_version() below to
+ * clear the live status line before logging. */
+static void status_clear(void);
+
 /* ── Terminal UI layer ──────────────────────────────────────────────────────
  * Capability is detected once in ui_init(); every decoration checks g_ui. */
 
@@ -266,9 +270,11 @@ static void cb_version(void *user) {
     b->probe_calls++;
     if (rc == 0) {
         b->probe_ok++;
+        status_clear();
         blog("version probe ok: fw=\"%s\"", tmp);
     } else {
         b->probe_fail++;
+        status_clear();
         blog("version probe FAILED: rc=%d  (firmware not responding on real UART)", rc);
     }
     ferrum_emit_version_text(writer_for_emit, b);
@@ -742,10 +748,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "  %s%s%s Virtual port    %s\n",
                 c_grn(), g_ok(), c_rst(), slave ? slave : "(unknown)");
         if (link)
-            fprintf(stderr, "    %s\xe2\x94\x94 linked at%s     %s\n",
-                    c_dim(), c_rst(), link);
+            fprintf(stderr, "    %s%s linked at%s     %s\n",
+                    c_dim(), g_ui.utf8 ? "\xe2\x94\x94" : "+", c_rst(), link);
     }
-    free(owned_link);
 #endif
 
     /* Initial firmware probe — non-fatal. Updates probe counters. */
@@ -809,6 +814,9 @@ int main(int argc, char **argv) {
         blog("error: ferrum_parser_create failed");
         vp_close(br.vp);
         hurra_close(br.hc);
+#ifndef _WIN32
+        free(owned_link);
+#endif
         return 1;
     }
 
@@ -817,8 +825,7 @@ int main(int argc, char **argv) {
     {
         const char *slave2 = vp_slave_path(br.vp);
         fprintf(stderr, "\n  Ready. Point your Ferrum tool at %s\n",
-                (args.link_path ? args.link_path :
-                 (slave2 ? slave2 : "the PTY")));
+                (link ? link : (slave2 ? slave2 : "the PTY")));
     }
 #else
     fprintf(stderr, "\n  Ready. Point your Ferrum tool at the other end of the com0com pair.\n");
@@ -898,6 +905,9 @@ int main(int argc, char **argv) {
 
         /* Detect link-health transitions and print an event line above the
          * status line so scrollback keeps a trail. */
+        /* Link-health is a cumulative summary: once both an ok and a failure
+         * have occurred it latches to "flapping" (it won't return to "ok").
+         * Event lines therefore fire on first transition into each state. */
         const char *health = ui_link_health(br.probe_ok, br.probe_fail);
         if (strcmp(health, last_health) != 0) {
             status_clear();
@@ -956,5 +966,8 @@ int main(int argc, char **argv) {
     ferrum_parser_destroy(br.parser);
     vp_close(br.vp);
     hurra_close(br.hc);
+#ifndef _WIN32
+    free(owned_link);
+#endif
     return 0;
 }
