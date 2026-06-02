@@ -94,19 +94,16 @@ static int configure_termios(int fd, uint32_t baud) {
 serial_port_t *serial_open(const char *path, uint32_t baud) {
     int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) {
-        fprintf(stderr, "serial_open(%s): %s\n", path, strerror(errno));
         return NULL;
     }
 
 #if defined(__linux__)
     if (configure_linux(fd, baud) != 0) {
-        fprintf(stderr, "serial_open(%s) configure: %s\n", path, strerror(errno));
         close(fd);
         return NULL;
     }
 #else
     if (configure_termios(fd, baud) != 0) {
-        fprintf(stderr, "serial_open(%s) configure: %s\n", path, strerror(errno));
         close(fd);
         return NULL;
     }

@@ -39,8 +39,6 @@ serial_port_t *serial_open(const char *path, uint32_t baud) {
     HANDLE h = CreateFileA(p, GENERIC_READ | GENERIC_WRITE,
                            0, NULL, OPEN_EXISTING, 0, NULL);
     if (h == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "serial_open(%s): CreateFileA failed (err=%lu)\n",
-                p, (unsigned long)GetLastError());
         return NULL;
     }
 
@@ -65,8 +63,6 @@ serial_port_t *serial_open(const char *path, uint32_t baud) {
     dcb.fNull        = FALSE;
     dcb.fAbortOnError= FALSE;
     if (!SetCommState(h, &dcb)) {
-        fprintf(stderr, "serial_open(%s): SetCommState failed (err=%lu)\n",
-                p, (unsigned long)GetLastError());
         CloseHandle(h);
         return NULL;
     }

@@ -40,26 +40,50 @@ points at whatever PTY slave the kernel allocated, so clients can hardcode
 a stable path.
 
 ```bash
-# Terminal 1 — bridge (4 Mbaud default; add --baud N only to override)
+# Terminal 1 — bridge (4 Mbaud default; add --baud N only to override).
+# --device is optional on Unix: with exactly one serial port present, the
+# bridge auto-detects it.
 ./build/hurra-bridge --device /dev/cu.usbmodem01
-# PTY: /dev/ttys004
-# Symlink: /Users/you/.hurra-bridge.tty
-# hurra: opened /dev/cu.usbmodem01 @ 4000000 baud
-# bridge: running. SIGINT to stop.
-
+#
+# hurra-bridge
+#
+#   ✓ Serial device   /dev/cu.usbmodem01 @ 4 Mbaud
+#   ✓ Virtual port    /dev/ttys004
+#     └ linked at     /Users/you/.hurra-bridge.tty
+#   ✓ Firmware        responding (fw "...")
+#
+#   Ready. Point your Ferrum tool at /Users/you/.hurra-bridge.tty
+#   Press Ctrl-C to stop.
+#
+# After "Ready" the bridge shows a single live status line that refreshes in
+# place (no scrolling):
+#   ⠋ running 1m24s · 12,480 moves · link ✓
+#
 # Terminal 2 — point any ferrum-speaking tool at the symlink
 ~/code/Hurra-v2/tools/ferrum_aim_test.py --port ~/.hurra-bridge.tty
 ```
+
+Output is colorized and uses a live status line when stderr is a terminal.
+When the output is piped or redirected (not a TTY), or when `NO_COLOR` is set
+or `--no-color` is passed, the bridge prints plain, greppable lines instead —
+a banner, a periodic status line, and a shutdown summary — with no escape
+codes.
+
+If the device can't be opened or the firmware doesn't answer, the bridge
+explains what went wrong and what to do about it (e.g. a missing device lists
+the serial ports it *did* find; a permissions error suggests the `dialout`
+group).
 
 Flags:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--device PATH` | _required_ | Real serial device (e.g. `/dev/cu.usbmodem01`, `COM5`). |
+| `--device PATH` | _auto on Unix_ | Real serial device (e.g. `/dev/cu.usbmodem01`, `COM5`). Auto-detected on Unix when exactly one serial port is present; required on Windows. |
 | `--baud N` | `4000000` | Real-link baud rate. |
 | `--link PATH` | `$HOME/.hurra-bridge.tty` | Symlink to the PTY slave (Unix only). |
 | `--virtual-port NAME` | _required on Win32_ | com0com COM name the bridge will open. |
 | `--timeout-ms N` | `250` | Per-request timeout for get-style commands. |
+| `--no-color` | _off_ | Disable colored output (also honors the `NO_COLOR` env var). |
 
 ## Quickstart — Windows + com0com
 
