@@ -33,6 +33,7 @@
 #else
 #  include <unistd.h>
 #  include <time.h>
+#  include <glob.h>
 #  define HOME_ENV "HOME"
 #endif
 
@@ -470,6 +471,41 @@ static char *default_link_path(void) {
     snprintf(out, n, "%s/.hurra-bridge.tty", home);
     return out;
 }
+
+#ifndef _WIN32
+/* Discovered serial-port candidate. */
+typedef struct { char path[256]; bool wch; } dev_cand_t;
+
+/* Enumerate likely serial ports, WCH/USB-serial first. Returns count, fills
+ * up to `max` candidates. Unix only. */
+static size_t discover_devices(dev_cand_t *out, size_t max) {
+    static const char *globs[] = {
+#if defined(__APPLE__)
+        "/dev/cu.wchusbserial*", "/dev/cu.usbmodem*", "/dev/cu.usbserial*",
+#else
+        "/dev/ttyACM*", "/dev/ttyUSB*",
+#endif
+    };
+    size_t n = 0;
+    for (size_t gi = 0; gi < sizeof(globs)/sizeof(globs[0]) && n < max; gi++) {
+        glob_t gl;
+        if (glob(globs[gi], 0, NULL, &gl) == 0) {
+            for (size_t i = 0; i < gl.gl_pathc && n < max; i++) {
+                /* Skip duplicates already collected. */
+                bool dup = false;
+                for (size_t k = 0; k < n; k++)
+                    if (strcmp(out[k].path, gl.gl_pathv[i]) == 0) { dup = true; break; }
+                if (dup) continue;
+                snprintf(out[n].path, sizeof(out[n].path), "%s", gl.gl_pathv[i]);
+                out[n].wch = strstr(gl.gl_pathv[i], "wch") != NULL;
+                n++;
+            }
+        }
+        globfree(&gl);
+    }
+    return n;
+}
+#endif /* !_WIN32 */
 
 /* ── Sleep ──────────────────────────────────────────────────────────────── */
 
