@@ -4,6 +4,7 @@
 #include "ui_util.h"
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 
 static int g_fail = 0;
 #define CHECK_STR(expr, want) do {                                        \
@@ -40,10 +41,33 @@ static void test_group_thousands(void) {
     CHECK_STR((ui_group_thousands(1000000, buf, sizeof buf), buf), "1,000,000");
 }
 
+static void test_classify_open(void) {
+    if (ui_open_category(ENOENT) != UI_OPEN_NOENT) { printf("FAIL ENOENT\n"); g_fail = 1; }
+    if (ui_open_category(EACCES) != UI_OPEN_ACCES) { printf("FAIL EACCES\n"); g_fail = 1; }
+    if (ui_open_category(EBUSY)  != UI_OPEN_BUSY)  { printf("FAIL EBUSY\n");  g_fail = 1; }
+    if (ui_open_category(EIO)    != UI_OPEN_OTHER) { printf("FAIL EIO\n");    g_fail = 1; }
+}
+
+static void test_link_health(void) {
+    CHECK_STR(ui_link_health(5, 0), "ok");
+    CHECK_STR(ui_link_health(0, 3), "dead");
+    CHECK_STR(ui_link_health(4, 2), "flapping");
+    CHECK_STR(ui_link_health(0, 0), "unknown");
+}
+
+static void test_spinner(void) {
+    if (ui_spinner_ascii(0) != '|') { printf("FAIL spin0\n"); g_fail = 1; }
+    if (ui_spinner_ascii(1) != '/') { printf("FAIL spin1\n"); g_fail = 1; }
+    if (ui_spinner_ascii(4) != '|') { printf("FAIL spin4 wrap\n"); g_fail = 1; }
+}
+
 int main(void) {
     test_humanize_baud();
     test_humanize_uptime();
     test_group_thousands();
+    test_classify_open();
+    test_link_health();
+    test_spinner();
     if (g_fail) { printf("TESTS FAILED\n"); return 1; }
     printf("ALL TESTS PASSED\n");
     return 0;

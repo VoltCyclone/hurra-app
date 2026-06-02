@@ -8,6 +8,7 @@
 #ifndef HURRA_UI_UTIL_H
 #define HURRA_UI_UTIL_H
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -51,6 +52,61 @@ static inline char *ui_group_thousands(uint64_t v, char *buf, size_t n) {
     }
     buf[out] = '\0';
     return buf;
+}
+
+/* Open-failure categories for friendly device-open diagnostics. */
+typedef enum {
+    UI_OPEN_NOENT,   /* no such device */
+    UI_OPEN_ACCES,   /* permission denied */
+    UI_OPEN_BUSY,    /* device in use */
+    UI_OPEN_OTHER    /* fall back to strerror */
+} ui_open_cat_t;
+
+static inline ui_open_cat_t ui_open_category(int err) {
+    switch (err) {
+        case ENOENT:
+#ifdef ENXIO
+        case ENXIO:
+#endif
+#ifdef ENODEV
+        case ENODEV:
+#endif
+            return UI_OPEN_NOENT;
+        case EACCES:
+#ifdef EPERM
+        case EPERM:
+#endif
+            return UI_OPEN_ACCES;
+        case EBUSY:
+            return UI_OPEN_BUSY;
+        default:
+            return UI_OPEN_OTHER;
+    }
+}
+
+/* Link-health label from cumulative probe counters (mirrors heartbeat logic). */
+static inline const char *ui_link_health(uint32_t ok, uint32_t fail) {
+    if (fail == 0 && ok > 0) return "ok";
+    if (ok == 0 && fail > 0) return "dead";
+    if (ok > 0 && fail > 0)  return "flapping";
+    return "unknown";
+}
+
+/* ASCII spinner frame for index i (wraps). */
+static inline char ui_spinner_ascii(uint64_t i) {
+    static const char frames[] = { '|', '/', '-', '\\' };
+    return frames[i % 4];
+}
+
+/* Unicode (Braille) spinner frame for index i (wraps). Returns a NUL-terminated
+ * multibyte string literal; used only when the terminal supports UTF-8/VT. */
+static inline const char *ui_spinner_braille(uint64_t i) {
+    static const char *frames[] = {
+        "\xe2\xa0\x8b","\xe2\xa0\x99","\xe2\xa0\xb9","\xe2\xa0\xb8",
+        "\xe2\xa0\xbc","\xe2\xa0\xb4","\xe2\xa0\xa6","\xe2\xa0\xa7",
+        "\xe2\xa0\x87","\xe2\xa0\x8f"
+    };
+    return frames[i % 10];
 }
 
 #endif /* HURRA_UI_UTIL_H */
