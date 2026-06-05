@@ -13,7 +13,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: macos-latest
+            platform: macos-arm64
+          - os: windows-latest
+            platform: windows-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,14 +34,19 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          # Single-config generators (Make/Ninja) emit build/; MSVC emits
-          # build/Release/. Rename per-OS so release assets don't collide.
+          # Tagged builds get a versioned name (e.g. hurra-bridge-v1.2.0-linux-x64);
+          # untagged CI builds fall back to the bare platform name.
+          ref="${{ github.ref }}"
+          ver=""
+          case "$ref" in refs/tags/*) ver="-${ref#refs/tags/}";; esac
+          base="hurra-bridge${ver}-${{ matrix.platform }}"
+          # Single-config generators (Make/Ninja) emit build/; MSVC emits build/Release/.
           if   [ -f build/hurra-bridge ]; then
-            cp build/hurra-bridge "dist/hurra-bridge-${{ matrix.os }}"
+            cp build/hurra-bridge "dist/${base}"
           elif [ -f build/Release/hurra-bridge.exe ]; then
-            cp build/Release/hurra-bridge.exe "dist/hurra-bridge-${{ matrix.os }}.exe"
+            cp build/Release/hurra-bridge.exe "dist/${base}.exe"
           elif [ -f build/hurra-bridge.exe ]; then
-            cp build/hurra-bridge.exe "dist/hurra-bridge-${{ matrix.os }}.exe"
+            cp build/hurra-bridge.exe "dist/${base}.exe"
           else
             echo "no hurra-bridge binary found" >&2
             exit 1
@@ -44,7 +55,7 @@ jobs:
       - name: Upload hurra-bridge binary
         uses: actions/upload-artifact@v4
         with:
-          name: hurra-bridge-${{ matrix.os }}
+          name: hurra-bridge-${{ matrix.platform }}
           path: dist/*
           if-no-files-found: error
 
