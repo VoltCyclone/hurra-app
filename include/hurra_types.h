@@ -38,6 +38,8 @@ extern "C" {
 #define HURRA_TYPE_INVERT_Y           0x18
 #define HURRA_TYPE_SWAP_XY            0x19
 #define HURRA_TYPE_HUMAN              0x1A
+#define HURRA_TYPE_MOUSE_MOVE_DUR     0x1B  /* int16 dx,dy + uint16 dur_ms (firmware-pending) */
+#define HURRA_TYPE_MOUSE_MOVE_BEZIER  0x1C  /* int16 dx,dy,uint16 dur_ms,int16 x1,y1,x2,y2 (firmware-pending) */
 #define HURRA_TYPE_BTN_LEFT           0x20
 #define HURRA_TYPE_BTN_RIGHT          0x21
 #define HURRA_TYPE_BTN_MIDDLE         0x22
@@ -64,6 +66,7 @@ extern "C" {
 #define HURRA_TYPE_LOCK_MX            0x65
 #define HURRA_TYPE_LOCK_MY            0x66
 #define HURRA_TYPE_CATCH_XY           0x67
+#define HURRA_TYPE_PHYS_MASK          0x68  /* uint8 domain,code,enable — enforce physical mask (firmware-pending) */
 
 /* ── 0x70–0x7F  Stream/callback enable ───────────────────────────────────── */
 #define HURRA_TYPE_STREAM_AXIS        0x70
@@ -73,6 +76,7 @@ extern "C" {
 #define HURRA_TYPE_CB_BUTTONS         0x74
 #define HURRA_TYPE_CB_AXES            0x75
 #define HURRA_TYPE_CB_KEYS            0x76
+#define HURRA_TYPE_CB_PHYS            0x77  /* enable physical-only telemetry (firmware-pending) */
 
 /* ── 0x80–0x8F  Unsolicited firmware-emitted telemetry ───────────────────── */
 #define HURRA_TYPE_TLM_AXIS           0x80
@@ -81,6 +85,9 @@ extern "C" {
 #define HURRA_TYPE_TLM_KB             0x83
 #define HURRA_TYPE_TLM_STATS          0x84
 #define HURRA_TYPE_TLM_LOG            0x85
+#define HURRA_TYPE_TLM_PHYS_AXIS      0x86  /* physical-only axis telemetry (firmware-pending) */
+#define HURRA_TYPE_TLM_PHYS_BUTTONS   0x87  /* physical-only button telemetry (firmware-pending) */
+#define HURRA_TYPE_TLM_PHYS_KB        0x88  /* physical-only keyboard telemetry (firmware-pending) */
 
 /* Wire stats payload (TYPE 0x02 reply, TYPE 0x84 push).
  * 36 bytes — must match pack_stats() in firmware.  Little-endian fields.
