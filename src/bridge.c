@@ -74,12 +74,10 @@ typedef struct {
 
     int  request_timeout_ms;
 
-    /* Diagnostics — bumped at hot-path points, dumped by the 5s heartbeat.
+    /* Stats shown on the live status line, heartbeat, and shutdown summary.
      * Single-threaded process; no synchronization needed.
      * uint64_t to handle long-running daemons. */
-    uint64_t hurra_rx_bytes;
-    uint64_t ferrum_lines_in;       /* lines successfully dispatched (kept for summary) */
-    uint64_t ferrum_moves;          /* move count — will be 0 in rewired bridge (known limitation) */
+    uint64_t ferrum_moves;          /* move count, fed by the input sink's move_count hook */
     uint32_t probe_calls;
     uint32_t probe_ok;
     uint32_t probe_fail;
@@ -596,7 +594,6 @@ int main(int argc, char **argv) {
             blog("hurra_poll error; exiting");
             break;
         }
-        if (drained > 0) br.hurra_rx_bytes += (uint64_t)drained;
 
         uint64_t now = mono_ms();
 
