@@ -49,11 +49,14 @@ set(BRIDGE_SOURCES
     src/ferrum_parser.c
     src/input_core.c
     src/frontend_vcom.c
+    src/frontend_kmbox.c
+    src/kmbox_codec.c
 )
 if(WIN32)
     list(APPEND BRIDGE_SOURCES src/virtual_port_win32.c)
 else()
     list(APPEND BRIDGE_SOURCES src/virtual_port_unix.c)
+    list(APPEND BRIDGE_SOURCES src/udp_socket_unix.c)
 endif()
 
 add_executable(hurra-bridge ${BRIDGE_SOURCES})
