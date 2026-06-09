@@ -10,6 +10,7 @@ static void clamp_i16(int32_t *v) {
 static void core_move(input_sink_t *s, int32_t dx, int32_t dy) {
     clamp_i16(&dx); clamp_i16(&dy);
     (void)hurra_move((hurra_client_t *)s->ctx, (int16_t)dx, (int16_t)dy);
+    if (s->move_count) (*s->move_count)++;
 }
 static void core_button(input_sink_t *s, int btn, int down) {
     if (btn < 0 || btn > 4) return;
@@ -45,12 +46,13 @@ static void core_reboot(input_sink_t *s) {
 
 int input_core_init(input_sink_t *out, struct hurra_client *hc) {
     if (!out || !hc) return -1;
-    out->ctx       = hc;
-    out->move      = core_move;
-    out->button    = core_button;
-    out->wheel     = core_wheel;
-    out->mouse_all = core_mouse_all;
-    out->kb_report = core_kb_report;
-    out->reboot    = core_reboot;
+    out->ctx        = hc;
+    out->move       = core_move;
+    out->button     = core_button;
+    out->wheel      = core_wheel;
+    out->mouse_all  = core_mouse_all;
+    out->kb_report  = core_kb_report;
+    out->reboot     = core_reboot;
+    out->move_count = NULL;
     return 0;
 }

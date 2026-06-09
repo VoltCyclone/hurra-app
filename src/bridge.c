@@ -479,6 +479,7 @@ int main(int argc, char **argv) {
     /* ── Build sink + frontend ───────────────────────────────────────────── */
     input_sink_t sink;
     input_core_init(&sink, br.hc);
+    sink.move_count = &br.ferrum_moves;
     frontend_t fe;
     memset(&fe, 0, sizeof fe);
 

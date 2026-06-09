@@ -29,6 +29,9 @@ typedef struct input_sink {
     void (*kb_report) (struct input_sink *s, uint8_t modifier,
                        const uint8_t *keys, int nkeys);
     void (*reboot)    (struct input_sink *s);
+    /* Optional: if non-NULL, core_move increments *move_count per move.
+     * Lets the host track a moves metric without the sink knowing about it. */
+    uint64_t *move_count;
 } input_sink_t;
 
 /* Construct a sink that forwards to a hurra_client_t. `hc` is borrowed.
