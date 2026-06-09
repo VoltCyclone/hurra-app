@@ -5,7 +5,12 @@ static uint32_t get_u32le(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1]<<8) |
            ((uint32_t)p[2]<<16) | ((uint32_t)p[3]<<24);
 }
-static int32_t get_i32le(const uint8_t *p) { return (int32_t)get_u32le(p); }
+static int32_t get_i32le(const uint8_t *p) {
+    uint32_t u = get_u32le(p);
+    int32_t v;
+    memcpy(&v, &u, sizeof v);
+    return v;
+}
 static void put_u32le(uint8_t *p, uint32_t v) {
     p[0]=(uint8_t)v; p[1]=(uint8_t)(v>>8); p[2]=(uint8_t)(v>>16); p[3]=(uint8_t)(v>>24);
 }
@@ -31,7 +36,7 @@ km_decoded_t km_decode(const uint8_t *buf, size_t len) {
         case KM_CMD_MOUSE_WHEEL:
         case KM_CMD_MOUSE_AUTOMOVE:
         case KM_CMD_BEZIER:
-            if (plen >= 16) {   /* button,x,y,wheel are the first 4 int32 */
+            if (plen >= KM_MOUSE_CORE_SIZE) {   /* button,x,y,wheel are the first 4 int32 */
                 d.button = get_i32le(&pl[0]);
                 d.x      = get_i32le(&pl[4]);
                 d.y      = get_i32le(&pl[8]);

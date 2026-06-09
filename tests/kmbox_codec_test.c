@@ -44,6 +44,8 @@ static void test_ack_roundtrip(void) {
     CHECK(d.valid);
     CHECK(d.head.cmd == KM_CMD_MOUSE_MOVE);
     CHECK(d.head.indexpts == 42);
+    CHECK(d.head.mac == 0xDEADBEEFu);
+    CHECK(d.head.rand == 0x12345678u);
 }
 
 static void test_mouse_move_payload(void) {
@@ -59,11 +61,28 @@ static void test_mouse_move_payload(void) {
     CHECK(d.y == -50);
 }
 
+static void test_keyboard_all_payload(void) {
+    uint8_t buf[KM_HEAD_SIZE + KM_KB_PAYLOAD_SIZE] = {0};
+    put_u32le(&buf[12], KM_CMD_KEYBOARD_ALL);
+    buf[KM_HEAD_SIZE + 0] = 0x02;          /* ctrl/modifier */
+    /* buf[KM_HEAD_SIZE + 1] is reserved (resvel) */
+    buf[KM_HEAD_SIZE + 2] = 0x04;          /* key 'a' */
+    buf[KM_HEAD_SIZE + 3] = 0x05;          /* key 'b' */
+    /* remaining key slots stay zero */
+    km_decoded_t d = km_decode(buf, sizeof buf);
+    CHECK(d.valid);
+    CHECK(d.kb_ctrl == 0x02);
+    CHECK(d.kb_keys[0] == 0x04);
+    CHECK(d.kb_keys[1] == 0x05);
+    CHECK(d.kb_nkeys == 2);
+}
+
 int main(void) {
     test_short_buffer();
     test_header_decode();
     test_ack_roundtrip();
     test_mouse_move_payload();
+    test_keyboard_all_payload();
     if (g_fail) { printf("TESTS FAILED\n"); return 1; }
     printf("ALL TESTS PASSED\n");
     return 0;

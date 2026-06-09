@@ -42,6 +42,7 @@ typedef struct {
 /* soft_mouse_t on the wire: int32 button, x, y, wheel, point[10] = 56 bytes.
  * soft_keyboard_t: int8 ctrl, int8 resvel, uint8 button[10] = 12 bytes. */
 #define KM_MOUSE_PAYLOAD_SIZE 56
+#define KM_MOUSE_CORE_SIZE    16  /* button,x,y,wheel: first 4 int32 the bridge uses */
 #define KM_KB_PAYLOAD_SIZE    12
 #define KM_KB_MAX_KEYS        10
 
