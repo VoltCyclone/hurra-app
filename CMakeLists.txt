@@ -46,6 +46,7 @@ endif()
 # Primary product: ferrum-on-PTY <-> hurra-on-serial translation daemon.
 set(BRIDGE_SOURCES
     src/bridge.c
+    src/selector.c
     src/ferrum_parser.c
     src/input_core.c
     src/frontend_vcom.c
