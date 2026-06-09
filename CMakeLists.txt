@@ -48,6 +48,7 @@ set(BRIDGE_SOURCES
     src/bridge.c
     src/ferrum_parser.c
     src/input_core.c
+    src/frontend_vcom.c
 )
 if(WIN32)
     list(APPEND BRIDGE_SOURCES src/virtual_port_win32.c)
