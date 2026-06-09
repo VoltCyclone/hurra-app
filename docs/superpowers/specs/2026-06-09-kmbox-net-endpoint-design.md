@@ -141,7 +141,7 @@ cmd_unmask_all 0x23344343
 | `mouse_move(x,y)` | `move(x,y)` | `MOUSE_MOVE 0x10` |
 | `mouse_left/right/middle(isdown)` | `button(mask,down)` | `BTN_* 0x20–0x22` |
 | `mouse_wheel(n)` | `wheel(n)` | `MOUSE_WHEEL 0x15` |
-| `mouse_all(button,x,y,wheel)` | `mouse_all(...)` | `MOUSE_MO 0x13` (fw has it; expose new host `hurra_mo()`) |
+| `mouse_all(button,x,y,wheel)` | `mouse_all(...)` | `MOUSE_MO 0x13` via existing `hurra_mo()` (already public in `hurra.h`) |
 | `keyboard_all(mod, keys[10])` | `kb_report(mod, keys)` | `KB_MULTIDOWN/UP 0x46/0x47` diffed vs previous report; modifier via `KB_DOWN 0xE0–0xE7`. **fw caps at 6 keys → truncate extras, log once.** |
 | `reboot` | `reboot()` | `REBOOT 0x04` |
 
