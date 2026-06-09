@@ -16,6 +16,52 @@ available for C/C++ projects that want to drive the Hurra protocol directly.
   platform-specific custom-baud APIs (IOSSIOSPEED on macOS, `termios2`/BOTHER
   on Linux, `DCB.BaudRate` on Windows).
 
+## Endpoints
+
+At startup the bridge shows an interactive menu and asks which endpoint to expose:
+
+```
+Select endpoint:
+  1) Virtual COM port  (Ferrum-compatible)
+  2) KMBox Net         (UDP)
+```
+
+A terminal (TTY) is required to make this selection. Running the bridge
+non-interactively — piped, redirected, or in CI — causes it to exit with an
+error (`No terminal to choose an endpoint`). This is a breaking change from
+prior versions, which auto-started the virtual COM port when stdin was not a
+terminal.
+
+### Option 1 — Virtual COM port (Ferrum)
+
+The bridge exposes a PTY (Unix) or virtual COM port pair (Windows) that
+Ferrum-speaking tools connect to. See the Quickstart sections below.
+
+### Option 2 — KMBox Net (UDP)
+
+The bridge emulates the device side of the KMBox Net UDP protocol. Client
+tools that already speak the KMBox Net protocol (e.g. KMBox Net libraries)
+connect by pointing at the host machine's IP and the UDP port set by
+`--km-port` (default `16896`). If `--km-mac` is set, clients must present
+that 4-byte MAC on connect; the default value `0` means the bridge accepts
+any client.
+
+**What works over KMBox Net now:**
+
+* Mouse move, left / right / middle buttons, wheel, and the combined mouse
+  report.
+* Full keyboard report.
+* Reboot.
+
+**Recognized but pending firmware support** (the bridge ACKs these commands
+but does not act on them yet):
+
+* `automove` (smoothed/interpolated move), `bezier` move, `monitor`
+  (physical-input streaming), and `mask`/`unmask` (blocking physical input).
+
+These features live on the device by design and require new Hurra-v2 firmware
+support; they are not emulated on the host.
+
 ## Build
 
 ```bash
@@ -38,6 +84,9 @@ The bridge owns the real serial port and exposes a pseudo-terminal that
 Ferrum-speaking tools connect to. A symlink at `$HOME/.hurra-bridge.tty`
 points at whatever PTY slave the kernel allocated, so clients can hardcode
 a stable path.
+
+On launch the bridge shows a menu to select the endpoint (see [Endpoints](#endpoints)).
+For the Ferrum workflow below, choose option 1 (Virtual COM port).
 
 ```bash
 # Terminal 1 — bridge (4 Mbaud default; add --baud N only to override).
@@ -84,6 +133,9 @@ Flags:
 | `--virtual-port NAME` | _required on Win32_ | com0com COM name the bridge will open. |
 | `--timeout-ms N` | `250` | Per-request timeout for get-style commands. |
 | `--no-color` | _off_ | Disable colored output (also honors the `NO_COLOR` env var). |
+| `--km-port N` | `16896` | UDP port for the KMBox Net endpoint. |
+| `--km-bind ADDR` | `0.0.0.0` | Address to bind the KMBox Net UDP socket. |
+| `--km-mac HEX` | `0` (any) | 4-byte MAC clients must present on connect; `0` accepts any client. |
 
 ## Quickstart — Windows + com0com
 
