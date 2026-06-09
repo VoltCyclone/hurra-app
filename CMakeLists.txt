@@ -55,6 +55,7 @@ set(BRIDGE_SOURCES
 )
 if(WIN32)
     list(APPEND BRIDGE_SOURCES src/virtual_port_win32.c)
+    list(APPEND BRIDGE_SOURCES src/udp_socket_win32.c)
 else()
     list(APPEND BRIDGE_SOURCES src/virtual_port_unix.c)
     list(APPEND BRIDGE_SOURCES src/udp_socket_unix.c)
@@ -67,6 +68,36 @@ target_include_directories(hurra-bridge
             ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+if(WIN32)
+    target_link_libraries(hurra-bridge PRIVATE ws2_32)
+endif()
+
 # ── examples ──────────────────────────────────────────────────────────────
 add_executable(hello examples/hello.c)
 target_link_libraries(hello PRIVATE hurra)
+
+# ── tests ─────────────────────────────────────────────────────────────────
+enable_testing()
+
+add_executable(kmbox_codec_test tests/kmbox_codec_test.c src/kmbox_codec.c)
+target_include_directories(kmbox_codec_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME kmbox_codec COMMAND kmbox_codec_test)
+
+add_executable(input_core_test tests/input_core_test.c)
+target_include_directories(input_core_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME input_core COMMAND input_core_test)
+
+add_executable(ui_util_test tests/ui_util_test.c)
+target_include_directories(ui_util_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME ui_util COMMAND ui_util_test)
+
+if(NOT WIN32)
+    add_executable(kmbox_loopback_test
+        tests/kmbox_loopback_test.c
+        src/frontend_kmbox.c
+        src/kmbox_codec.c
+        src/udp_socket_unix.c)
+    target_include_directories(kmbox_loopback_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME kmbox_loopback COMMAND kmbox_loopback_test)
+endif()
