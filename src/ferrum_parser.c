@@ -59,12 +59,18 @@ static bool parse_int(const char *s, uint8_t len, int32_t *out) {
     return true;
 }
 
+static inline char lc(char c) {
+    return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+}
+
+/* Ferrum spec §5: include_sw accepts true/false in ANY case. */
 static bool parse_bool(const char *s, uint8_t len, bool *out) {
-    if (len == 4 && s[0] == 't' && s[1] == 'r' && s[2] == 'u' && s[3] == 'e') {
+    if (len == 4 && lc(s[0]) == 't' && lc(s[1]) == 'r' &&
+        lc(s[2]) == 'u' && lc(s[3]) == 'e') {
         *out = true; return true;
     }
-    if (len == 5 && s[0] == 'f' && s[1] == 'a' && s[2] == 'l' &&
-        s[3] == 's' && s[4] == 'e') {
+    if (len == 5 && lc(s[0]) == 'f' && lc(s[1]) == 'a' && lc(s[2]) == 'l' &&
+        lc(s[3]) == 's' && lc(s[4]) == 'e') {
         *out = false; return true;
     }
     return false;
@@ -107,8 +113,9 @@ void ferrum_emit_pair(ferrum_write_fn w, void *u, int32_t x, int32_t y) {
 }
 
 void ferrum_emit_buttons_cb(ferrum_write_fn w, void *u, uint8_t bitmap) {
-    uint8_t buf[6] = { 'k', 'm', '.', bitmap, '\r', '\n' };
-    if (w) w(buf, 6, u);
+    /* §6: "km." + raw bitmap byte + "\r\n" + ">>> " prompt. */
+    uint8_t buf[10] = { 'k', 'm', '.', bitmap, '\r', '\n', '>', '>', '>', ' ' };
+    if (w) w(buf, 10, u);
 }
 
 void ferrum_emit_axes_cb(ferrum_write_fn w, void *u,
@@ -123,6 +130,7 @@ void ferrum_emit_axes_cb(ferrum_write_fn w, void *u,
     buf[n++] = ','; buf[n++] = ' ';
     n += ferrum_format_int(scroll, &buf[n]);
     buf[n++] = ')'; buf[n++] = '\r'; buf[n++] = '\n';
+    buf[n++] = '>'; buf[n++] = '>'; buf[n++] = '>'; buf[n++] = ' ';
     if (w) w((const uint8_t *)buf, n, u);
 }
 
@@ -151,6 +159,7 @@ void ferrum_emit_keys_cb(ferrum_write_fn w, void *u, const uint8_t keys[6]) {
         first = false;
     }
     buf[n++] = ')'; buf[n++] = '\r'; buf[n++] = '\n';
+    buf[n++] = '>'; buf[n++] = '>'; buf[n++] = '>'; buf[n++] = ' ';
     if (w) w((const uint8_t *)buf, n, u);
 }
 
@@ -194,7 +203,14 @@ struct ferrum_parser {
     uint8_t  line_pos;
     bool     overflow;
     uint32_t last_byte_ms;
+
+    /* Optional reply channel for Software-API framing (echo + ">>> " prompt).
+     * NULL → no framing (Legacy API / tests). See ferrum_parser_set_writer. */
+    ferrum_write_fn write;
+    void           *write_user;
 };
+
+static const uint8_t k_prompt[4] = { '>', '>', '>', ' ' };
 
 ferrum_parser_t *ferrum_parser_create(const ferrum_callbacks_t *cbs, void *user) {
     ferrum_parser_t *p = (ferrum_parser_t *)calloc(1, sizeof(*p));
@@ -206,6 +222,12 @@ ferrum_parser_t *ferrum_parser_create(const ferrum_callbacks_t *cbs, void *user)
 
 void ferrum_parser_destroy(ferrum_parser_t *p) {
     free(p);
+}
+
+void ferrum_parser_set_writer(ferrum_parser_t *p, ferrum_write_fn w, void *user) {
+    if (!p) return;
+    p->write      = w;
+    p->write_user = user;
 }
 
 static inline bool name_is(const char *s, uint8_t len, const char *kw) {
@@ -467,7 +489,21 @@ void ferrum_parser_feed_byte(ferrum_parser_t *p, uint8_t b) {
     if (b == '\r' || b == '\n') {
         if (p->line_pos > 0 && !p->overflow) {
             p->line[p->line_pos] = '\0';
+            /* §2 output order for every accepted command:
+             *   1. verbatim echo of the line, terminator normalized to "\r\n"
+             *   2. the return value (written by the dispatched callback, if any)
+             *   3. the ">>> " prompt
+             * Steps 1 & 3 only when a Software-API writer is installed; the
+             * value lands between them because callbacks write synchronously
+             * to the same channel during dispatch_line(). */
+            if (p->write) {
+                p->write((const uint8_t *)p->line, p->line_pos, p->write_user);
+                p->write((const uint8_t *)"\r\n", 2, p->write_user);
+            }
             dispatch_line(p, p->line, p->line_pos);
+            if (p->write) {
+                p->write(k_prompt, sizeof(k_prompt), p->write_user);
+            }
         }
         p->line_pos = 0;
         p->overflow = false;

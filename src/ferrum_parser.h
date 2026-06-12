@@ -70,6 +70,21 @@ typedef struct {
 ferrum_parser_t *ferrum_parser_create(const ferrum_callbacks_t *cbs, void *user);
 void             ferrum_parser_destroy(ferrum_parser_t *p);
 
+/* Writer fn type (also used by the emit helpers below). */
+typedef void (*ferrum_write_fn)(const uint8_t *buf, size_t n, void *user);
+
+/* Install the reply channel used for Ferrum Software-API framing: the verbatim
+ * command echo (terminator normalized to "\r\n") emitted before each accepted
+ * line is dispatched, and the ">>> " prompt emitted after. Per spec §2 this is
+ * what client parsers synchronize on. Pass w=NULL (the default after create) to
+ * suppress all framing — the Legacy API path and unit tests run with no writer,
+ * preserving the original echo-less behavior.
+ *
+ * The writer must target the SAME channel the on_* reply callbacks write to, so
+ * echo / value / prompt stay in order. Get-style callbacks write their value
+ * (via ferrum_emit_*) during dispatch, landing between echo and prompt. */
+void ferrum_parser_set_writer(ferrum_parser_t *p, ferrum_write_fn w, void *user);
+
 /* Feed one byte of input. Triggers callbacks on terminator (\r or \n). */
 void ferrum_parser_feed_byte(ferrum_parser_t *p, uint8_t b);
 
@@ -85,8 +100,7 @@ void ferrum_parser_tick(ferrum_parser_t *p);
 size_t ferrum_format_int(int32_t v, char *buf);
 
 /* "kmbox: Ferrum\r\n" length-prefixed write helper. Pass a writer that
- * accepts (buf, n). */
-typedef void (*ferrum_write_fn)(const uint8_t *buf, size_t n, void *user);
+ * accepts (buf, n). (ferrum_write_fn is declared above.) */
 void ferrum_emit_version_text (ferrum_write_fn w, void *u);
 void ferrum_emit_bool         (ferrum_write_fn w, void *u, int v);
 void ferrum_emit_pair         (ferrum_write_fn w, void *u, int32_t x, int32_t y);

@@ -91,6 +91,12 @@ add_executable(ui_util_test tests/ui_util_test.c)
 target_include_directories(ui_util_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME ui_util COMMAND ui_util_test)
 
+# Ferrum Software-API wire framing: verbatim echo, ">>> " prompt, async
+# callback format, NUL-safe button byte, case-insensitive bool (ferrumSpec.md).
+add_executable(ferrum_framing_test tests/ferrum_framing_test.c src/ferrum_parser.c)
+target_include_directories(ferrum_framing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME ferrum_framing COMMAND ferrum_framing_test)
+
 if(NOT WIN32)
     add_executable(kmbox_loopback_test
         tests/kmbox_loopback_test.c
