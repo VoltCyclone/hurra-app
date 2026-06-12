@@ -369,6 +369,15 @@ static void status_render(bridge_t *b, uint64_t tick) {
     fflush(stderr);
 }
 
+/* VCOM health hook: each Ferrum `version` query re-probes the firmware over the
+ * real UART; fold that result into the live probe counters so link health stays
+ * fresh for the status line, heartbeat, and event lines. */
+static void on_vcom_health(void *user, bool ok) {
+    bridge_t *b = (bridge_t *)user;
+    b->probe_calls++;
+    if (ok) b->probe_ok++; else b->probe_fail++;
+}
+
 /* ── main ───────────────────────────────────────────────────────────────── */
 
 int main(int argc, char **argv) {
@@ -504,7 +513,8 @@ int main(int argc, char **argv) {
         const char *link = args.link_path;
         if (!link) { owned_link = default_link_path(); link = owned_link; }
 #endif
-        if (frontend_vcom_open(&fe, &sink, br.hc, vp_arg, link, args.timeout_ms) != 0) {
+        if (frontend_vcom_open(&fe, &sink, br.hc, vp_arg, link, args.timeout_ms,
+                               on_vcom_health, &br) != 0) {
             hurra_close(br.hc);
 #ifndef _WIN32
             free(owned_link);

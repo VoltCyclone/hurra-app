@@ -38,6 +38,10 @@ typedef struct {
     hurra_client_t  *hc;
     int              timeout_ms;
 
+    /* Optional host health hook, fired on each `version` re-probe. */
+    vcom_health_cb   health_cb;
+    void            *health_user;
+
     /* Per-callback local enable state (ferrum semantics: readable). */
     bool cb_buttons_enabled;
     bool cb_axes_enabled;
@@ -113,7 +117,8 @@ static void fv_tlm_kb(uint8_t type, const uint8_t *data,
 
 /* Version: probe firmware and emit canonical Ferrum version text.
  * status_clear() is dropped (bridge-only UI); blog() → fprintf(stderr,...).
- * probe_* counters are dropped (bridge-level stats). */
+ * The probe result is reported to the host via health_cb so link health stays
+ * fresh; the probe_* counters themselves remain bridge-level state. */
 static void fv_version(void *user) {
     vcom_t *v = (vcom_t *)user;
     char tmp[64] = {0};
@@ -124,6 +129,7 @@ static void fv_version(void *user) {
         fprintf(stderr, "version probe FAILED: rc=%d  (firmware not responding on real UART)\n", rc);
     }
     fflush(stderr);
+    if (v->health_cb) v->health_cb(v->health_user, rc == 0);
     ferrum_emit_version_text(vcom_write, v);
 }
 
@@ -306,13 +312,16 @@ static const char *vcom_describe(frontend_t *fe) {
 int frontend_vcom_open(frontend_t *out, input_sink_t *sink,
                        struct hurra_client *hc,
                        const char *vp_arg, const char *link_path,
-                       int request_timeout_ms) {
+                       int request_timeout_ms,
+                       vcom_health_cb health_cb, void *health_user) {
     vcom_t *v = (vcom_t *)calloc(1, sizeof(vcom_t));
     if (!v) return -1;
 
-    v->sink       = sink;
-    v->hc         = hc;
-    v->timeout_ms = request_timeout_ms;
+    v->sink        = sink;
+    v->hc          = hc;
+    v->timeout_ms  = request_timeout_ms;
+    v->health_cb   = health_cb;
+    v->health_user = health_user;
 
     v->vp = vp_open(vp_arg, link_path);
     if (!v->vp) {
@@ -354,6 +363,11 @@ int frontend_vcom_open(frontend_t *out, input_sink_t *sink,
         free(v);
         return -1;
     }
+
+    /* Install the Software-API reply channel: verbatim echo + ">>> " prompt
+     * around each dispatched line. Same writer the on_* callbacks use, so
+     * echo / value / prompt stay strictly ordered on the PTY. */
+    ferrum_parser_set_writer(v->parser, vcom_write, v);
 
     /* Register telemetry handlers. */
     (void)hurra_on_telemetry(hc, HURRA_TYPE_TLM_BUTTONS, fv_tlm_buttons, v);
