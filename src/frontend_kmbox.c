@@ -16,10 +16,31 @@ typedef struct {
     /* one-shot "pending firmware" log guards */
     bool          warned_automove, warned_bezier, warned_monitor, warned_mask;
     uint64_t      rx_bad;
+    bool          debug;      /* HURRA_KM_DEBUG: trace every datagram to stderr */
 } kmbox_t;
 
 static void warn_once(bool *flag, const char *cmd) {
     if (!*flag) { fprintf(stderr, "kmbox: pending firmware: %s\n", cmd); *flag = true; }
+}
+
+/* Human-readable name for a KMBox command code (for diagnostics). */
+static const char *km_cmd_name(uint32_t cmd) {
+    switch (cmd) {
+        case KM_CMD_CONNECT:        return "connect";
+        case KM_CMD_MOUSE_MOVE:     return "mouse_move";
+        case KM_CMD_MOUSE_LEFT:     return "mouse_left";
+        case KM_CMD_MOUSE_RIGHT:    return "mouse_right";
+        case KM_CMD_MOUSE_MIDDLE:   return "mouse_middle";
+        case KM_CMD_MOUSE_WHEEL:    return "mouse_wheel";
+        case KM_CMD_MOUSE_AUTOMOVE: return "mouse_automove";
+        case KM_CMD_BEZIER:         return "bezier";
+        case KM_CMD_KEYBOARD_ALL:   return "keyboard_all";
+        case KM_CMD_REBOOT:         return "reboot";
+        case KM_CMD_MONITOR:        return "monitor";
+        case KM_CMD_MASK_MOUSE:     return "mask_mouse";
+        case KM_CMD_UNMASK_ALL:     return "unmask_all";
+        default:                    return "UNKNOWN";
+    }
 }
 
 static int km_poll(frontend_t *fe) {
@@ -30,6 +51,15 @@ static int km_poll(frontend_t *fe) {
     if (n <= 0) return n;   /* 0 idle, -1 error */
 
     km_decoded_t d = km_decode(buf, (size_t)n);
+    if (k->debug) {
+        if (!d.valid)
+            fprintf(stderr, "kmbox rx: n=%d  TOO SHORT (need >= %d for header)\n",
+                    n, KM_HEAD_SIZE);
+        else
+            fprintf(stderr, "kmbox rx: n=%d  cmd=0x%08X (%s)  mac=0x%08X  x=%d y=%d btn=%d\n",
+                    n, d.head.cmd, km_cmd_name(d.head.cmd), d.head.mac,
+                    (int)d.x, (int)d.y, (int)d.button);
+    }
     if (!d.valid) { k->rx_bad++; return 1; }
 
     bool ack = true;
@@ -61,6 +91,8 @@ static int km_poll(frontend_t *fe) {
         case KM_CMD_MASK_MOUSE:
         case KM_CMD_UNMASK_ALL:     warn_once(&k->warned_mask,     "mask");     break;
         default:
+            if (k->debug)
+                fprintf(stderr, "kmbox: unknown cmd 0x%08X dropped (no ACK)\n", d.head.cmd);
             ack = false; k->rx_bad++; break;
     }
 
@@ -92,6 +124,7 @@ int frontend_kmbox_open(frontend_t *out, input_sink_t *sink,
     if (!k->sock) { free(k); return -1; }
     k->sink = sink;
     k->mac  = mac;
+    { const char *dbg = getenv("HURRA_KM_DEBUG"); k->debug = (dbg && *dbg && *dbg != '0'); }
     snprintf(k->desc, sizeof k->desc, "UDP %s:%u",
              (bind_addr && *bind_addr) ? bind_addr : "0.0.0.0", (unsigned)port);
     out->impl     = k;
