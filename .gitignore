@@ -11,3 +11,5 @@ build/
 .idea/
 compile_commands.json
 .claude/
+.remember/
+superpowers/
