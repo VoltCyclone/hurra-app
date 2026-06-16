@@ -53,12 +53,15 @@ set(BRIDGE_SOURCES
     src/frontend_kmbox.c
     src/kmbox_codec.c
 )
+list(APPEND BRIDGE_SOURCES src/serial_enum.c)
 if(WIN32)
     list(APPEND BRIDGE_SOURCES src/virtual_port_win32.c)
     list(APPEND BRIDGE_SOURCES src/udp_socket_win32.c)
+    list(APPEND BRIDGE_SOURCES src/serial_enum_win32.c)
 else()
     list(APPEND BRIDGE_SOURCES src/virtual_port_unix.c)
     list(APPEND BRIDGE_SOURCES src/udp_socket_unix.c)
+    list(APPEND BRIDGE_SOURCES src/serial_enum_stub.c)
 endif()
 
 add_executable(hurra-bridge ${BRIDGE_SOURCES})
@@ -69,7 +72,7 @@ target_include_directories(hurra-bridge
 )
 
 if(WIN32)
-    target_link_libraries(hurra-bridge PRIVATE ws2_32)
+    target_link_libraries(hurra-bridge PRIVATE ws2_32 setupapi)
 endif()
 
 # ── examples ──────────────────────────────────────────────────────────────
