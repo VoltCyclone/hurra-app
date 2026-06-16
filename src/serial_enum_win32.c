@@ -62,6 +62,11 @@ size_t serial_enum(serial_cand_t *out, size_t max) {
                       SetupDiEnumDeviceInfo(set, i, &dev); i++) {
         char name[32];
         if (!read_port_name(set, &dev, name, sizeof name)) continue;
+        /* GUID_DEVCLASS_PORTS also covers LPT (parallel) ports; skip them so
+         * they neither clutter error listings nor consume candidate slots. */
+        if ((name[0] == 'L' || name[0] == 'l') &&
+            (name[1] == 'P' || name[1] == 'p') &&
+            (name[2] == 'T' || name[2] == 't')) continue;
 
         char hwid[256];
         get_str_prop(set, &dev, SPDRP_HARDWAREID, hwid, sizeof hwid);
