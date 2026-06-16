@@ -15,6 +15,7 @@
 #include "frontend_kmbox.h"
 #include "input_core.h"
 #include "selector.h"
+#include "serial_enum.h"
 #include "hurra.h"
 #include "hurra_types.h"
 #include "ui_util.h"
@@ -198,13 +199,13 @@ static void usage(const char *prog) {
         "\n"
         "  --device PATH        Real serial device (e.g. /dev/cu.usbmodem01, COM5).\n"
 #ifdef _WIN32
-        "                       Required on Windows.\n"
+        "                       Optional: auto-detected (WCH CH343) when one is present.\n"
 #else
         "                       Optional: auto-detected when exactly one port is found.\n"
 #endif
         "  --baud N             Real-link baud rate. Default 4000000 (4 Mbaud).\n"
         "  --link PATH          Symlink to the PTY slave (Unix). Default $%s/.hurra-bridge.tty.\n"
-        "  --virtual-port NAME  com0com COM name to open (Windows; required there).\n"
+        "  --virtual-port NAME  com0com COM name (Windows). Optional: auto-detected.\n"
         "  --timeout-ms N       Per-request timeout for get-style commands. Default 250.\n"
         "  --km-port N          KMBox Net UDP port to listen on. Default %d.\n"
         "  --km-bind ADDR       KMBox Net bind address. Default 0.0.0.0.\n"
@@ -253,15 +254,7 @@ static int parse_args(int argc, char **argv, args_t *out) {
         else { fprintf(stderr, "%s%s unknown option: %s%s\n",
                        c_red(), g_bad(), a, c_rst()); usage(argv[0]); return -1; }
     }
-#ifdef _WIN32
-    if (!out->device) {
-        fprintf(stderr, "%s%s --device is required on Windows%s\n",
-                c_red(), g_bad(), c_rst());
-        usage(argv[0]);
-        return -1;
-    }
-#endif
-    /* On Unix, a missing --device triggers auto-discovery in main() (Task 7). */
+    /* A missing --device triggers auto-discovery in main() (Unix: glob; Windows: SetupAPI). */
     return 0;
 }
 
@@ -309,6 +302,7 @@ static size_t discover_devices(dev_cand_t *out, size_t max) {
     }
     return n;
 }
+#endif /* !_WIN32 */
 
 /* Append formatted text to buf[cap] starting at *off, clamping so *off never
  * exceeds cap-1. No-op once the buffer is full. Keeps multi-append loops safe. */
@@ -323,7 +317,6 @@ static void str_appendf(char *buf, size_t cap, int *off, const char *fmt, ...) {
     *off += w;
     if ((size_t)*off >= cap) *off = (int)cap - 1; /* clamp to last valid index */
 }
-#endif /* !_WIN32 */
 
 /* ── Sleep ──────────────────────────────────────────────────────────────── */
 
@@ -423,6 +416,50 @@ int main(int argc, char **argv) {
     }
 #endif
 
+#ifdef _WIN32
+    char auto_dev[256] = {0};
+    bool device_auto = false;
+    if (!args.device) {
+        serial_cand_t cands[16];
+        size_t nc = serial_enum(cands, 16);
+        /* Collect firmware candidates. */
+        size_t fw_idx[16]; size_t nfw = 0;
+        for (size_t i = 0; i < nc; i++)
+            if (cands[i].klass == PORT_FIRMWARE) fw_idx[nfw++] = i;
+
+        if (nfw == 1) {
+            snprintf(auto_dev, sizeof auto_dev, "%s", cands[fw_idx[0]].name);
+            args.device = auto_dev;
+            device_auto = true;
+        } else if (nfw == 0) {
+            char body[700]; int o = 0;
+            str_appendf(body, sizeof body, &o,
+                "  Couldn't find a Hurra device (WCH CH343, VID_1A86).\n");
+            if (nc) {
+                str_appendf(body, sizeof body, &o, "  Serial ports present:\n");
+                for (size_t i = 0; i < nc; i++)
+                    str_appendf(body, sizeof body, &o, "      %s  %s\n",
+                                cands[i].name, cands[i].friendly);
+            }
+            str_appendf(body, sizeof body, &o,
+                "  -> Plug the device in (and install the WCH CH343 driver),\n"
+                "     or force a port with:  hurra-bridge.exe --device COMx");
+            return bridge_fail(2, "No Hurra device found", body);
+        } else {
+            char body[700]; int o = 0;
+            str_appendf(body, sizeof body, &o,
+                "  Found several Hurra-like ports:\n");
+            for (size_t i = 0; i < nfw; i++)
+                str_appendf(body, sizeof body, &o, "      %s  %s\n",
+                            cands[fw_idx[i]].name, cands[fw_idx[i]].friendly);
+            str_appendf(body, sizeof body, &o,
+                "  -> Pick one, e.g.:  hurra-bridge.exe --device %s",
+                cands[fw_idx[0]].name);
+            return bridge_fail(2, "Multiple Hurra devices found", body);
+        }
+    }
+#endif
+
     br.hc = hurra_open(args.device, args.baud);
     if (!br.hc) {
         char head[320], body[640];
@@ -500,12 +537,31 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
         const char *link = NULL;
         const char *vp_arg = args.virtual_port;
+        char auto_vp[32] = {0};
         if (!vp_arg) {
-            hurra_close(br.hc);
-            return bridge_fail(1, "No --virtual-port given (required on Windows)",
-                "  hurra-bridge needs a com0com virtual COM pair.\n"
-                "  -> Install com0com, create a pair with setupc.exe (e.g. CNCA0 <-> CNCB0),\n"
-                "     then run:  hurra-bridge.exe --device COM5 --virtual-port CNCA0");
+            serial_cand_t cands[16];
+            size_t nc = serial_enum(cands, 16);
+            /* Lowest-numbered com0com end (ends are interchangeable). */
+            int best = -1; long best_num = -1;
+            for (size_t i = 0; i < nc; i++) {
+                if (cands[i].klass != PORT_COM0COM) continue;
+                long num = -1;
+                for (const char *p = cands[i].name; *p; p++)
+                    if (*p >= '0' && *p <= '9') { num = strtol(p, NULL, 10); break; }
+                if (best < 0 || (num >= 0 && (best_num < 0 || num < best_num))) {
+                    best = (int)i; best_num = num;
+                }
+            }
+            if (best < 0) {
+                hurra_close(br.hc);
+                return bridge_fail(1, "No com0com virtual port found",
+                    "  hurra-bridge needs a com0com virtual COM pair.\n"
+                    "  -> Install com0com, create a pair with setupc.exe (e.g. CNCA0 <-> CNCB0),\n"
+                    "     then re-run, or pass --virtual-port NAME explicitly.");
+            }
+            snprintf(auto_vp, sizeof auto_vp, "%s", cands[best].name);
+            vp_arg = auto_vp;
+            blog("auto-selected com0com port %s", vp_arg);
         }
 #else
         const char *vp_arg = NULL;
@@ -519,8 +575,14 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
             free(owned_link);
 #endif
+#ifdef _WIN32
+            return bridge_fail(1, "Can't open the com0com virtual port",
+                "  The port may already be in use, or the name is wrong.\n"
+                "  -> Check the pair in Device Manager, or pass --virtual-port NAME explicitly.");
+#else
             return bridge_fail(1, "Can't create the virtual serial port (PTY)",
                 "  The kernel refused to allocate a pseudo-terminal.");
+#endif
         }
 #ifndef _WIN32
         /* vp_open strdups link_path internally; owned_link no longer needed. */
@@ -534,14 +596,9 @@ int main(int argc, char **argv) {
     {
         char baudbuf[32];
         ui_humanize_baud(args.baud, baudbuf, sizeof baudbuf);
-#ifndef _WIN32
         fprintf(stderr, "  %s%s%s Serial device   %s @ %s%s\n",
                 c_grn(), g_ok(), c_rst(), args.device, baudbuf,
                 device_auto ? "  (auto-detected)" : "");
-#else
-        fprintf(stderr, "  %s%s%s Serial device   %s @ %s\n",
-                c_grn(), g_ok(), c_rst(), args.device, baudbuf);
-#endif
         fprintf(stderr, "  %s%s%s Endpoint        %s\n",
                 c_grn(), g_ok(), c_rst(), fe.describe(&fe));
     }
