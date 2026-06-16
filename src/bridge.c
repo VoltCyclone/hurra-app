@@ -199,13 +199,13 @@ static void usage(const char *prog) {
         "\n"
         "  --device PATH        Real serial device (e.g. /dev/cu.usbmodem01, COM5).\n"
 #ifdef _WIN32
-        "                       Required on Windows.\n"
+        "                       Optional: auto-detected (WCH CH343) when one is present.\n"
 #else
         "                       Optional: auto-detected when exactly one port is found.\n"
 #endif
         "  --baud N             Real-link baud rate. Default 4000000 (4 Mbaud).\n"
         "  --link PATH          Symlink to the PTY slave (Unix). Default $%s/.hurra-bridge.tty.\n"
-        "  --virtual-port NAME  com0com COM name to open (Windows; required there).\n"
+        "  --virtual-port NAME  com0com COM name (Windows). Optional: auto-detected.\n"
         "  --timeout-ms N       Per-request timeout for get-style commands. Default 250.\n"
         "  --km-port N          KMBox Net UDP port to listen on. Default %d.\n"
         "  --km-bind ADDR       KMBox Net bind address. Default 0.0.0.0.\n"

@@ -127,10 +127,10 @@ Flags:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--device PATH` | _auto on Unix_ | Real serial device (e.g. `/dev/cu.usbmodem01`, `COM5`). Auto-detected on Unix when exactly one serial port is present; required on Windows. |
+| `--device PATH` | _auto_ | Real serial device (e.g. `/dev/cu.usbmodem01`, `COM5`). Auto-detected when exactly one port is present (Unix: any serial port; Windows: a WCH CH343 device); pass to override. |
 | `--baud N` | `4000000` | Real-link baud rate. |
 | `--link PATH` | `$HOME/.hurra-bridge.tty` | Symlink to the PTY slave (Unix only). |
-| `--virtual-port NAME` | _required on Win32_ | com0com COM name the bridge will open. |
+| `--virtual-port NAME` | _auto on Win32_ | com0com COM name the bridge will open. Auto-detected when a com0com pair is present; pass to override. |
 | `--timeout-ms N` | `250` | Per-request timeout for get-style commands. |
 | `--no-color` | _off_ | Disable colored output (also honors the `NO_COLOR` env var). |
 | `--km-port N` | `16896` | UDP port for the KMBox Net endpoint. |
@@ -143,10 +143,16 @@ Windows has no PTY equivalent, so the bridge requires a pre-configured
 [com0com](https://com0com.sourceforge.net/) virtual COM port pair.
 
 1. Install com0com and run `setupc.exe` to create a pair, e.g. `CNCA0 ↔ CNCB0`.
-2. Run the bridge against one end:
+2. Plug in the Hurra device and run the bridge — both COM ports auto-detect:
 
    ```cmd
-   hurra-bridge.exe --device COM5 --baud 4000000 --virtual-port CNCA0
+   hurra-bridge.exe
+   ```
+
+   To override either, pass the flag explicitly:
+
+   ```cmd
+   hurra-bridge.exe --device COM5 --virtual-port CNCA0
    ```
 
 3. Point your Ferrum-speaking tool at the other end (`CNCB0`).
