@@ -537,12 +537,31 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
         const char *link = NULL;
         const char *vp_arg = args.virtual_port;
+        char auto_vp[32] = {0};
         if (!vp_arg) {
-            hurra_close(br.hc);
-            return bridge_fail(1, "No --virtual-port given (required on Windows)",
-                "  hurra-bridge needs a com0com virtual COM pair.\n"
-                "  -> Install com0com, create a pair with setupc.exe (e.g. CNCA0 <-> CNCB0),\n"
-                "     then run:  hurra-bridge.exe --device COM5 --virtual-port CNCA0");
+            serial_cand_t cands[16];
+            size_t nc = serial_enum(cands, 16);
+            /* Lowest-numbered com0com end (ends are interchangeable). */
+            int best = -1; long best_num = -1;
+            for (size_t i = 0; i < nc; i++) {
+                if (cands[i].klass != PORT_COM0COM) continue;
+                long num = -1;
+                for (const char *p = cands[i].name; *p; p++)
+                    if (*p >= '0' && *p <= '9') { num = strtol(p, NULL, 10); break; }
+                if (best < 0 || (num >= 0 && (best_num < 0 || num < best_num))) {
+                    best = (int)i; best_num = num;
+                }
+            }
+            if (best < 0) {
+                hurra_close(br.hc);
+                return bridge_fail(1, "No com0com virtual port found",
+                    "  hurra-bridge needs a com0com virtual COM pair.\n"
+                    "  -> Install com0com, create a pair with setupc.exe (e.g. CNCA0 <-> CNCB0),\n"
+                    "     then re-run, or pass --virtual-port NAME explicitly.");
+            }
+            snprintf(auto_vp, sizeof auto_vp, "%s", cands[best].name);
+            vp_arg = auto_vp;
+            blog("auto-selected com0com port %s", vp_arg);
         }
 #else
         const char *vp_arg = NULL;
@@ -556,8 +575,14 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
             free(owned_link);
 #endif
+#ifdef _WIN32
+            return bridge_fail(1, "Can't open the com0com virtual port",
+                "  The port may already be in use, or the name is wrong.\n"
+                "  -> Check the pair in Device Manager, or pass --virtual-port NAME explicitly.");
+#else
             return bridge_fail(1, "Can't create the virtual serial port (PTY)",
                 "  The kernel refused to allocate a pseudo-terminal.");
+#endif
         }
 #ifndef _WIN32
         /* vp_open strdups link_path internally; owned_link no longer needed. */
